@@ -30,7 +30,7 @@ on:
       quality_threshold:
         description: 'Quality threshold (0.0-1.0)'
         required: false
-        default: '0.55'
+        default: '0.45'
       fresh_start:
         description: 'Fresh curation (clear dedup state)'
         required: false
@@ -368,6 +368,7 @@ jobs:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_CUSTOM_DOMAIN: ${{ secrets.R2_CUSTOM_DOMAIN }}
           # Model caching
           TF_CPP_MIN_LOG_LEVEL: '2'
           HF_HOME: ~/.cache/huggingface

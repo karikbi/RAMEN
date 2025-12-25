@@ -316,7 +316,7 @@ class FilteringPipeline:
 def run_part2_pipeline(
     candidates: list[CandidateWallpaper],
     config: Optional[Config] = None,
-    quality_threshold: float = 0.50  # LAION + SigLIP hybrid scoring
+    quality_threshold: float = 0.45  # LAION + SigLIP hybrid scoring
 ) -> list[ApprovedWallpaper]:
     """
     Run the Part 2 filtering pipeline.

@@ -33,7 +33,7 @@ Build a world-class wallpaper dataset with best-in-class embeddings and the rich
 - Full attribution and licensing information
 
 ### 💎 Quality Standards
-- **Minimum resolution**: 2560×1440 (QHD)
+- **Minimum resolution**: 1920×1080 or equivalent (supports portrait for mobile)
 - **Uniqueness**: <85% perceptual hash similarity
 - **Text coverage**: <30% (rejects screenshots)
 - **Quality score**: ≥0.85 threshold (adjusts by collection phase)
@@ -119,6 +119,7 @@ R2_ENDPOINT=https://account_id.r2.cloudflarestorage.com
 R2_ACCESS_KEY=your_r2_access_key
 R2_SECRET_KEY=your_r2_secret_key
 R2_BUCKET_NAME=your_bucket_name
+R2_CUSTOM_DOMAIN=wallpapers.yourdomain.com  # Optional: custom domain
 ```
 
 3. **Customize pipeline settings** (optional)
@@ -192,6 +193,7 @@ Configure these in **Settings → Secrets and variables → Actions**:
 | `R2_ACCESS_KEY` | R2 access key ID |
 | `R2_SECRET_KEY` | R2 secret access key |
 | `R2_BUCKET_NAME` | R2 bucket name |
+| `R2_CUSTOM_DOMAIN` | Custom domain for R2 CDN (optional) |
 | `PERSONAL_GITHUB_TOKEN` | PAT with repo write access |
 
 See [`.github/SECRETS.md`](.github/SECRETS.md) for detailed setup instructions.

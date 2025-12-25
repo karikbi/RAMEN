@@ -103,10 +103,27 @@ class HardFilters:
             return False, None, f"Corrupted file: {str(e)}"
     
     def check_resolution(self, img: Image.Image) -> Tuple[bool, str]:
-        """Check minimum resolution requirements."""
+        """Check minimum resolution requirements.
+        
+        Accepts both:
+        - Landscape: 1920x1080 or larger
+        - Portrait: 1080x1920 or larger (for mobile phones)
+        """
         width, height = img.size
-        if width < self.config.min_width or height < self.config.min_height:
-            return False, f"Resolution too low: {width}x{height} (min: {self.config.min_width}x{self.config.min_height})"
+        
+        # Calculate total pixels for equivalent size check
+        min_pixels = self.config.min_width * self.config.min_height  # 1920*1080 = 2,073,600
+        actual_pixels = width * height
+        
+        # Check if image meets minimum pixel count (allows both orientations)
+        if actual_pixels < min_pixels:
+            return False, f"Resolution too low: {width}x{height} ({actual_pixels:,} pixels, min: {min_pixels:,} pixels)"
+        
+        # Also ensure minimum dimension is at least 1080 (for quality)
+        min_dimension = min(self.config.min_width, self.config.min_height)  # 1080
+        if min(width, height) < min_dimension:
+            return False, f"Resolution too low: {width}x{height} (smallest side must be at least {min_dimension}px)"
+        
         return True, ""
     
     def check_file_size(self, filepath: Path) -> Tuple[bool, int, str]:

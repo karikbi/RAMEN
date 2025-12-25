@@ -92,7 +92,7 @@ class WallpaperCurationPipeline:
     def __init__(
         self,
         config: Optional[Config] = None,
-        quality_threshold: float = 0.50,  # LAION + SigLIP hybrid scoring
+        quality_threshold: float = 0.45,  # LAION + SigLIP hybrid scoring
         skip_upload: bool = False,
         skip_part1: bool = False,
         dry_run: bool = False,
@@ -723,7 +723,7 @@ class WallpaperCurationPipeline:
 
 
 async def main(
-    quality_threshold: float = 0.50,  # LAION + SigLIP hybrid scoring
+    quality_threshold: float = 0.45,  # LAION + SigLIP hybrid scoring
     skip_upload: bool = False,
     skip_part1: bool = False,
     dry_run: bool = False,
