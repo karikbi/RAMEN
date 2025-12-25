@@ -13,9 +13,9 @@
 # -----------------------------------------------------------------------------
 quality:
   # Minimum score to approve a wallpaper (0.0-1.0)
-  # Using ML-based SigLIP scoring with softmax probability
-  # 0.55 = slightly more likely to match "high quality" than "low quality"
-  threshold: 0.55
+  # Using hybrid LAION Aesthetic + SigLIP scoring
+  # 0.50 = 5/10 on LAION scale (reasonable minimum quality)
+  threshold: 0.50
 
   
   # Component weights (must sum to 1.0)

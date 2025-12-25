@@ -39,6 +39,10 @@ torchvision>=0.16.0
 # Hugging Face Transformers (for SigLIP)
 transformers>=4.36.0
 
+# LAION Aesthetic Predictor (trained on millions of human aesthetic ratings)
+# Produces intuitive 1-10 scores for aesthetic quality
+simple-aesthetics-predictor>=0.1.0
+
 # SentencePiece (required by SigLIP tokenizer)
 sentencepiece>=0.1.99
 

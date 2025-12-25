@@ -55,7 +55,7 @@ class Config:
     r2_bucket_name: str = field(default_factory=lambda: os.getenv("R2_BUCKET_NAME", ""))
     
     # Quality thresholds
-    quality_threshold: float = 0.55  # Lowered for softmax-based ML scoring
+    quality_threshold: float = 0.50  # LAION + SigLIP hybrid scoring
     
     # Subreddit configurations - lowered upvote requirements for more candidates
     subreddits: list[SubredditConfig] = field(default_factory=lambda: [
