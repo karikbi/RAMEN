@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Wallpaper Curation Pipeline - Part 2: Quality Scoring
+Wallpaper Curation Pipeline - Part 2: Quality Scoring (DEPRECATED)
 
-Multi-component quality scoring system evaluating visual quality, composition,
-aesthetic appeal, and wallpaper suitability.
+DEPRECATED: This module uses hand-coded heuristics that don't work well.
+Use ml_quality_scorer.py instead, which uses SigLIP for semantic quality assessment.
+
+Kept for reference and potential hybrid scoring in the future.
 """
+
 
 import logging
 from dataclasses import dataclass, field
@@ -51,7 +54,7 @@ class QualityConfig:
     composition_weight: float = 0.30
     aesthetic_weight: float = 0.20
     suitability_weight: float = 0.10
-    quality_threshold: float = 0.70  # Lowered from 0.85 for more approvals
+    quality_threshold: float = 0.55  # Lowered for softmax-based ML scoring
 
 
 class QualityScorer:

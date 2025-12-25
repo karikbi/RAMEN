@@ -55,7 +55,7 @@ class Config:
     r2_bucket_name: str = field(default_factory=lambda: os.getenv("R2_BUCKET_NAME", ""))
     
     # Quality thresholds
-    quality_threshold: float = 0.70  # Lowered from 0.85
+    quality_threshold: float = 0.55  # Lowered for softmax-based ML scoring
     
     # Subreddit configurations - lowered upvote requirements for more candidates
     subreddits: list[SubredditConfig] = field(default_factory=lambda: [
@@ -971,9 +971,12 @@ async def fetch_pexels_candidates(
     return candidates
 
 
-async def main() -> list[CandidateWallpaper]:
+async def main(test_mode: bool = False) -> list[CandidateWallpaper]:
     """
     Main entry point for the wallpaper curation pipeline Part 1.
+    
+    Args:
+        test_mode: If True, fetch only 10 wallpapers (5 Reddit, 2 Unsplash, 3 Pexels)
     
     Returns:
         List of all CandidateWallpaper objects fetched and downloaded.
@@ -984,6 +987,24 @@ async def main() -> list[CandidateWallpaper]:
     
     # Initialize configuration
     config = Config()
+    
+    # TEST MODE: Override config to fetch only 10 wallpapers
+    if test_mode:
+        logger.info("🧪 TEST MODE: Fetching only 10 wallpapers")
+        logger.info("   - Reddit: 5 (1 from each of top 5 subreddits)")
+        logger.info("   - Unsplash: 2")
+        logger.info("   - Pexels: 3")
+        
+        # Override subreddit configs to fetch just 1 each from top 5
+        config.subreddits = [
+            SubredditConfig("wallpapers", 1, 50),
+            SubredditConfig("EarthPorn", 1, 50),
+            SubredditConfig("Amoledbackgrounds", 1, 50),
+            SubredditConfig("spaceporn", 1, 50),
+            SubredditConfig("CityPorn", 1, 50),
+        ]
+        config.unsplash_count = 2
+        config.pexels_count = 3
     
     # Validate configuration
     errors = config.validate()
@@ -1007,6 +1028,7 @@ async def main() -> list[CandidateWallpaper]:
     # Create aiohttp session with connection pooling
     connector = aiohttp.TCPConnector(limit=10)
     timeout = aiohttp.ClientTimeout(total=300)
+
     
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         # Fetch from all sources (can be parallelized if needed)

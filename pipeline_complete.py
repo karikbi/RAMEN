@@ -92,12 +92,13 @@ class WallpaperCurationPipeline:
     def __init__(
         self,
         config: Optional[Config] = None,
-        quality_threshold: float = 0.85,
+        quality_threshold: float = 0.55,  # Softmax-based ML scoring
         skip_upload: bool = False,
         skip_part1: bool = False,
         dry_run: bool = False,
         max_runtime_minutes: int = 50,
         fresh_start: bool = False,
+        test_mode: bool = False,
     ):
         """
         Initialize the pipeline.
@@ -117,6 +118,7 @@ class WallpaperCurationPipeline:
         self.skip_part1 = skip_part1
         self.dry_run_enabled = dry_run
         self.fresh_start = fresh_start
+        self.test_mode = test_mode
         
         # If fresh start, clear local dedup/state files before initialization
         if fresh_start:
@@ -198,7 +200,7 @@ class WallpaperCurationPipeline:
         logger.info("=" * 70)
         
         start = time.time()
-        candidates = await fetch_candidates()
+        candidates = await fetch_candidates(test_mode=self.test_mode)
         self.stats.fetch_duration_sec = time.time() - start
         
         # Count by source
@@ -721,12 +723,13 @@ class WallpaperCurationPipeline:
 
 
 async def main(
-    quality_threshold: float = 0.85,
+    quality_threshold: float = 0.55,  # Softmax-based ML scoring
     skip_upload: bool = False,
     skip_part1: bool = False,
     dry_run: bool = False,
     max_runtime_minutes: int = 50,
     fresh_start: bool = False,
+    test_mode: bool = False,
 ) -> list[ApprovedWallpaper]:
     """
     Run the complete wallpaper curation pipeline.
@@ -749,6 +752,7 @@ async def main(
         dry_run=dry_run,
         max_runtime_minutes=max_runtime_minutes,
         fresh_start=fresh_start,
+        test_mode=test_mode,
     )
     
     return await pipeline.run()
@@ -802,6 +806,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Fresh start - reset deduplication system and start clean (ignores previous runs)"
     )
+    parser.add_argument(
+        "--test-mode",
+        action="store_true",
+        help="Test mode - fetch only 10 wallpapers (5 Reddit, 2 Unsplash, 3 Pexels) for quick testing"
+    )
+
     
     args = parser.parse_args()
     
@@ -830,6 +840,7 @@ if __name__ == "__main__":
         dry_run=args.dry_run,
         max_runtime_minutes=args.max_runtime,
         fresh_start=args.fresh,
+        test_mode=args.test_mode,
     ))
     
     if approved:

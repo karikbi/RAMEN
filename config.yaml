@@ -13,8 +13,10 @@
 # -----------------------------------------------------------------------------
 quality:
   # Minimum score to approve a wallpaper (0.0-1.0)
-  # Lowered from 0.85 to 0.70 for initial curation - adjust as scoring improves
-  threshold: 0.70
+  # Using ML-based SigLIP scoring with softmax probability
+  # 0.55 = slightly more likely to match "high quality" than "low quality"
+  threshold: 0.55
+
   
   # Component weights (must sum to 1.0)
   weights:

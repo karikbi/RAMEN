@@ -22,10 +22,15 @@ on:
   # Manual trigger for testing
   workflow_dispatch:
     inputs:
+      test_mode:
+        description: '🧪 TEST MODE: Fetch only 10 wallpapers (5 Reddit, 2 Unsplash, 3 Pexels)'
+        required: false
+        type: boolean
+        default: false
       quality_threshold:
         description: 'Quality threshold (0.0-1.0)'
         required: false
-        default: '0.70'
+        default: '0.55'
       fresh_start:
         description: 'Fresh curation (clear dedup state)'
         required: false
@@ -46,6 +51,7 @@ on:
         required: false
         type: boolean
         default: false
+
   
   # Trigger on workflow file changes (for testing)
   push:
@@ -274,14 +280,24 @@ jobs:
           echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo "================================================"
           
-          # Set quality threshold from input or default
-          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.70' }}"
+          # Get input values
+          TEST_MODE="${{ github.event.inputs.test_mode || 'false' }}"
+          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.55' }}"
           FRESH_START="${{ github.event.inputs.fresh_start || 'false' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
           DEBUG="${{ github.event.inputs.debug || 'false' }}"
           
           # Build command with optional flags
           CMD="python pipeline_complete.py --quality-threshold $QUALITY_THRESHOLD --max-runtime 50"
+          
+          # TEST MODE: Only fetch 10 images for quick testing
+          if [ "$TEST_MODE" = "true" ]; then
+            echo "🧪 TEST MODE ENABLED: Fetching only 10 wallpapers"
+            echo "   - Reddit: 5"
+            echo "   - Unsplash: 2"
+            echo "   - Pexels: 3"
+            CMD="$CMD --test-mode"
+          fi
           
           if [ "$FRESH_START" = "true" ]; then
             CMD="$CMD --fresh"
@@ -297,6 +313,7 @@ jobs:
           
           echo "Running: $CMD"
           
+
           # Run pipeline and capture output
           set +e
           $CMD 2>&1 | tee ./logs/pipeline_$(date +%Y%m%d_%H%M%S).log

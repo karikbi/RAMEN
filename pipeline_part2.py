@@ -20,9 +20,10 @@ from curate_wallpapers import CandidateWallpaper, Config
 
 # Import Part 2 modules
 from filters import HardFilters, FilterConfig, FilterResult
-from quality_scorer import QualityScorer, QualityConfig, QualityScores
+from ml_quality_scorer import MLQualityScorer, MLQualityConfig, MLQualityScore
 from embeddings import EmbeddingExtractor, EmbeddingSet
 from metadata_generator import MetadataGenerator, WallpaperMetadata
+
 
 logger = logging.getLogger("wallpaper_curator")
 
@@ -38,7 +39,7 @@ class ApprovedWallpaper:
     artist: str
     
     # Part 2 additions
-    quality_scores: QualityScores = field(default_factory=QualityScores)
+    quality_scores: MLQualityScore = field(default_factory=MLQualityScore)
     embeddings: EmbeddingSet = field(default_factory=EmbeddingSet)
     metadata: WallpaperMetadata = field(default_factory=WallpaperMetadata)
     phash: Optional[str] = None
@@ -101,8 +102,8 @@ class FilteringPipeline:
     """
     Main filtering pipeline that processes candidates through:
     1. Hard filters (auto-reject)
-    2. Quality scoring
-    3. Embedding extraction
+    2. ML-based quality scoring (using SigLIP)
+    3. Embedding extraction (for approved images only)
     4. Metadata generation
     """
     
@@ -110,18 +111,21 @@ class FilteringPipeline:
         self,
         config: Config,
         filter_config: Optional[FilterConfig] = None,
-        quality_config: Optional[QualityConfig] = None,
+        quality_config: Optional[MLQualityConfig] = None,
     ):
         self.config = config
         self.filter_config = filter_config or FilterConfig()
-        self.quality_config = quality_config or QualityConfig(
-            quality_threshold=config.quality_threshold
+        self.quality_config = quality_config or MLQualityConfig(
+            threshold=config.quality_threshold
         )
         
         # Initialize components
         self.hard_filters = HardFilters(self.filter_config)
-        self.quality_scorer = QualityScorer(self.quality_config)
         self.embedding_extractor = EmbeddingExtractor()
+        self.ml_quality_scorer = MLQualityScorer(
+            embedding_extractor=self.embedding_extractor,
+            config=self.quality_config
+        )
         self.metadata_generator = MetadataGenerator()
         
         # Statistics
@@ -129,6 +133,7 @@ class FilteringPipeline:
         
         # Track new hashes for saving
         self.new_hashes: dict[str, str] = {}
+
     
     def _categorize_rejection(self, reason: str) -> None:
         """Categorize rejection reason for statistics."""
@@ -178,37 +183,36 @@ class FilteringPipeline:
         
         self.stats.passed_hard_filters += 1
         
-        # Step 2: SigLIP Quality Score (LIGHTWEIGHT - before heavy embedding extraction)
-        # SigLIP determines quality AND provides embedding for manifest enrichment
-        siglip_embedding, ml_quality_score = self.embedding_extractor.calculate_siglip_quality_score(
-            candidate.filepath
+        # Step 2: ML Quality Scoring with SOURCE-AWARE weights
+        # Reddit: balanced (aesthetic 40%, technical 20%, wallpaper 40%)
+        # Unsplash/Pexels: focus on wallpaper suitability (80%)
+        ml_score, siglip_embedding = self.ml_quality_scorer.score_for_source(
+            candidate.filepath,
+            source=candidate.source
         )
+
         
-        # Step 3: Quality Check (BEFORE expensive embeddings)
-        quality_scores = QualityScores()
-        quality_scores.final_score = ml_quality_score
-        
-        logger.debug(f"{candidate.id}: ML Quality Score = {ml_quality_score:.3f}")
-        
-        if quality_scores.final_score < self.quality_config.quality_threshold:
+        # Step 3: Quality Check
+        if ml_score.final_score < self.quality_config.threshold:
             self.stats.rejected_quality_score += 1
             self.hard_filters.reject_candidate(
                 candidate.filepath,
-                f"Quality score {quality_scores.final_score:.3f} < {self.quality_config.quality_threshold}"
+                f"Quality score {ml_score.final_score:.3f} < {self.quality_config.threshold} "
+                f"(aes={ml_score.aesthetic_score:.2f}, tech={ml_score.technical_score:.2f}, wall={ml_score.wallpaper_score:.2f})"
             )
-            logger.debug(f"Rejected {candidate.id}: quality {quality_scores.final_score:.3f}")
             return None
         
         self.stats.passed_quality_scoring += 1
         
         # Step 4: Extract Remaining Embeddings (ONLY FOR APPROVED IMAGES)
-        # This saves compute - MobileNet, EfficientNet, DINOv2 only run on approved images
-        logger.debug(f"Extracting remaining embeddings for approved image {candidate.id}")
+        # SigLIP already extracted, now get MobileNet, EfficientNet, DINOv2
+        logger.info(f"Approved {candidate.id} (score={ml_score.final_score:.3f}) - extracting embeddings")
         embeddings = EmbeddingSet()
         embeddings.siglip = siglip_embedding
         embeddings.mobilenet_v3 = self.embedding_extractor.extract_mobilenet(candidate.filepath)
         embeddings.efficientnet_v2 = self.embedding_extractor.extract_efficientnet(candidate.filepath)
         embeddings.dinov2 = self.embedding_extractor.extract_dinov2(candidate.filepath)
+
         
         # Step 5: Generate Metadata
         metadata = self.metadata_generator.generate_metadata(
@@ -217,7 +221,7 @@ class FilteringPipeline:
             artist=candidate.artist,
             source=candidate.source,
             source_metadata=candidate.metadata,
-            quality_score=quality_scores.final_score
+            quality_score=ml_score.final_score
         )
         
         # Step 6: Move to approved directory
@@ -242,7 +246,7 @@ class FilteringPipeline:
             url=candidate.url,
             title=candidate.title,
             artist=candidate.artist,
-            quality_scores=quality_scores,
+            quality_scores=ml_score,
             embeddings=embeddings,
             metadata=metadata,
             phash=filter_result.phash
@@ -312,7 +316,7 @@ class FilteringPipeline:
 def run_part2_pipeline(
     candidates: list[CandidateWallpaper],
     config: Optional[Config] = None,
-    quality_threshold: float = 0.85
+    quality_threshold: float = 0.55  # Lowered for softmax-based ML scoring
 ) -> list[ApprovedWallpaper]:
     """
     Run the Part 2 filtering pipeline.
@@ -335,8 +339,8 @@ def run_part2_pipeline(
     # Override quality threshold if specified
     config.quality_threshold = quality_threshold
     
-    # Quality config
-    quality_config = QualityConfig(quality_threshold=quality_threshold)
+    # ML Quality config
+    quality_config = MLQualityConfig(threshold=quality_threshold)
     
     # Run pipeline
     pipeline = FilteringPipeline(

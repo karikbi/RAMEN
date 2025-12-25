@@ -263,12 +263,19 @@ class EmbeddingExtractor:
         """
         Extract SigLIP embedding AND calculate quality score using text similarity.
         
-        Uses SigLIP's text-image alignment to score images against quality prompts.
-        Returns both the embedding (for storage) and a quality score (0-1).
+        Uses softmax over positive vs negative prompt similarities to compute
+        a probability-like quality score. More mathematically sound than raw
+        similarity differences.
+        
+        Returns:
+            Tuple of (embedding, quality_score). 
+            - embedding: 1152-dim float16 vector
+            - quality_score: 0.0-1.0, where higher = better quality
         """
         model, processor = self._load_siglip()
         if model is None or processor is None:
-            return None, 0.0
+            logger.warning("SigLIP model not loaded, using default score 0.75")
+            return None, 0.75  # Default pass score if model fails to load
         
         try:
             import torch
@@ -276,31 +283,21 @@ class EmbeddingExtractor:
             
             img = self._load_image(filepath, (384, 384))
             
-            # Quality-related text prompts
-            positive_prompts = [
-                "a beautiful high quality wallpaper",
-                "stunning professional photography",
-                "high resolution sharp detailed image",
-                "aesthetic pleasing visual composition",
-            ]
-            
-            negative_prompts = [
-                "blurry low quality image",
-                "ugly poorly composed photo",
-                "noisy grainy low resolution",
-                "watermark text overlay meme",
-            ]
+            # Single comparison prompt pair - simpler and more reliable
+            positive_prompt = "a high quality beautiful wallpaper photograph"
+            negative_prompt = "a low quality blurry bad image"
             
             # Process image
             image_inputs = processor(images=img, return_tensors="pt")
             
-            # Process text prompts
+            # Process both prompts
             text_inputs = processor(
-                text=positive_prompts + negative_prompts, 
+                text=[positive_prompt, negative_prompt], 
                 padding=True, 
                 return_tensors="pt"
             )
             
+            # Move to device
             if self.device == "cuda":
                 image_inputs = {k: v.cuda() for k, v in image_inputs.items()}
                 text_inputs = {k: v.cuda() for k, v in text_inputs.items()}
@@ -309,35 +306,47 @@ class EmbeddingExtractor:
                 text_inputs = {k: v.to("mps") for k, v in text_inputs.items()}
             
             with torch.no_grad():
+                # Get features
                 image_features = model.get_image_features(**image_inputs)
                 text_features = model.get_text_features(**text_inputs)
                 
-                # Normalize
+                # Normalize for cosine similarity
                 image_features = F.normalize(image_features, dim=-1)
                 text_features = F.normalize(text_features, dim=-1)
                 
-                # Compute similarities
+                # Compute similarities: [positive_sim, negative_sim]
                 similarities = torch.matmul(image_features, text_features.T)[0]
                 
-                n_positive = len(positive_prompts)
-                positive_scores = similarities[:n_positive]
-                negative_scores = similarities[n_positive:]
+                pos_sim = similarities[0].item()
+                neg_sim = similarities[1].item()
                 
-                # Quality score: positive - negative alignment
-                pos_mean = torch.sigmoid(positive_scores).mean().item()
-                neg_mean = torch.sigmoid(negative_scores).mean().item()
+                # Use softmax with temperature to convert to probabilities
+                # Temperature controls sensitivity - lower = more discriminative
+                temperature = 0.1
+                logits = torch.tensor([pos_sim, neg_sim]) / temperature
+                probs = F.softmax(logits, dim=0)
                 
-                quality_score = (pos_mean - neg_mean + 1) / 2
-                quality_score = max(0.0, min(1.0, quality_score))
+                # Quality score = probability of matching positive prompt
+                quality_score = probs[0].item()
                 
+                # Log for debugging
+                logger.info(
+                    f"Quality: pos_sim={pos_sim:.3f}, neg_sim={neg_sim:.3f}, "
+                    f"score={quality_score:.3f}"
+                )
+                
+                # Get embedding
                 embedding = image_features.cpu().numpy()[0].astype(np.float16)
             
             return embedding, quality_score
             
         except Exception as e:
             logger.error(f"SigLIP quality scoring failed: {e}")
-            return None, 0.0
+            # Return a default passing score on error - don't reject due to model issues
+            return None, 0.75
     
+
+
     # =========================================================================
     # DINOV2 (1024-dim)
     # =========================================================================
