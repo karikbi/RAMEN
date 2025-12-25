@@ -997,10 +997,8 @@ class HealthChecker:
         results = {}
         
         # Reddit
-        results["reddit"] = bool(
-            os.getenv("REDDIT_CLIENT_ID") and
-            os.getenv("REDDIT_CLIENT_SECRET")
-        )
+        # Reddit (No auth needed)
+        results["reddit"] = True
         
         # Unsplash
         results["unsplash"] = bool(os.getenv("UNSPLASH_ACCESS_KEY"))

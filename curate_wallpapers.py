@@ -19,11 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Dict
 from urllib.parse import urlparse
-
-import praw
-from praw.models import Submission
 
 # =============================================================================
 # CONFIGURATION
@@ -42,8 +39,7 @@ class Config:
     """Central configuration for the wallpaper curation pipeline."""
     
     # API Credentials (loaded from environment)
-    reddit_client_id: str = field(default_factory=lambda: os.getenv("REDDIT_CLIENT_ID", ""))
-    reddit_client_secret: str = field(default_factory=lambda: os.getenv("REDDIT_CLIENT_SECRET", ""))
+    # Reddit no longer requires keys for this public JSON method
     reddit_user_agent: str = field(default_factory=lambda: os.getenv("REDDIT_USER_AGENT", "RAMEN-Pipeline/1.0"))
     unsplash_access_key: str = field(default_factory=lambda: os.getenv("UNSPLASH_ACCESS_KEY", ""))
     pexels_api_key: str = field(default_factory=lambda: os.getenv("PEXELS_API_KEY", ""))
@@ -80,15 +76,12 @@ class Config:
     base_delay: float = 1.0  # seconds
     
     # Rate limiting
-    request_delay: float = 0.5  # seconds between API requests
-
+    request_delay: float = 2.0  # seconds between API requests
+    
     def validate(self) -> list[str]:
         """Validate required configuration values."""
         errors = []
-        if not self.reddit_client_id:
-            errors.append("REDDIT_CLIENT_ID not set")
-        if not self.reddit_client_secret:
-            errors.append("REDDIT_CLIENT_SECRET not set")
+        # Reddit keys removed from validation
         if not self.unsplash_access_key:
             errors.append("UNSPLASH_ACCESS_KEY not set")
         if not self.pexels_api_key:
@@ -254,124 +247,131 @@ def get_file_extension(url: str, content_type: Optional[str] = None) -> str:
 # =============================================================================
 
 class RedditFetcher:
-    """Fetches wallpaper candidates from Reddit using PRAW."""
+    """Fetches wallpaper candidates from Reddit using public JSON feeds (No API Auth)."""
+    
+    BASE_URL = "https://www.reddit.com"
     
     def __init__(self, config: Config):
         self.config = config
-        self.reddit = praw.Reddit(
-            client_id=config.reddit_client_id,
-            client_secret=config.reddit_client_secret,
-            user_agent=config.reddit_user_agent,
-        )
-        self.reddit.read_only = True
+        self.headers = {
+            "User-Agent": config.reddit_user_agent
+        }
     
-    def _extract_image_url(self, submission: Submission) -> Optional[str]:
+    def _extract_image_url(self, post_data: Dict[str, Any]) -> Optional[str]:
         """
-        Extract direct image URL from a Reddit submission.
+        Extract direct image URL from a Reddit post data dict.
         Handles: direct images, imgur links, Reddit galleries.
-        
-        Args:
-            submission: PRAW Submission object.
-        
-        Returns:
-            Direct image URL or None if not extractable.
         """
-        url = submission.url.lower()
+        url = post_data.get("url", "").lower()
         
         # Direct image links
         if any(url.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]):
-            return submission.url
+            return post_data["url"]
         
         # Reddit hosted images
         if "i.redd.it" in url:
-            return submission.url
+            return post_data["url"]
         
         # Reddit galleries
-        if hasattr(submission, "is_gallery") and submission.is_gallery:
+        if post_data.get("is_gallery"):
             try:
-                if hasattr(submission, "media_metadata") and submission.media_metadata:
-                    for item_id, item in submission.media_metadata.items():
+                media_metadata = post_data.get("media_metadata", {})
+                if media_metadata:
+                    # Get the first valid image from the gallery
+                    for item_id, item in media_metadata.items():
                         if item.get("status") == "valid" and "s" in item:
                             img_url = item["s"].get("u", "")
                             # Unescape URL
                             return img_url.replace("&amp;", "&")
             except Exception as e:
-                logger.debug(f"Failed to parse gallery for {submission.id}: {e}")
+                logger.debug(f"Failed to parse gallery for {post_data.get('id')}: {e}")
             return None
         
         # Imgur single images
         if "imgur.com" in url and not any(x in url for x in ["/a/", "/gallery/"]):
-            imgur_id_match = re.search(r"imgur\.com/(\w+)", submission.url)
+            imgur_id_match = re.search(r"imgur\.com/(\w+)", post_data["url"])
             if imgur_id_match:
                 imgur_id = imgur_id_match.group(1)
                 return f"https://i.imgur.com/{imgur_id}.jpg"
         
         # Preview fallback (lower quality but reliable)
-        if hasattr(submission, "preview"):
+        preview = post_data.get("preview", {})
+        if preview:
             try:
-                images = submission.preview.get("images", [])
+                images = preview.get("images", [])
                 if images:
                     source = images[0].get("source", {})
                     preview_url = source.get("url", "")
                     return preview_url.replace("&amp;", "&")
             except Exception as e:
-                logger.debug(f"Failed to get preview for {submission.id}: {e}")
+                logger.debug(f"Failed to get preview for {post_data.get('id')}: {e}")
         
         return None
     
-    def fetch_subreddit(self, subreddit_config: SubredditConfig) -> list[dict[str, Any]]:
+    async def fetch_subreddit(self, session: aiohttp.ClientSession, subreddit_config: SubredditConfig) -> list[dict[str, Any]]:
         """
-        Fetch top posts from a subreddit.
-        
-        Args:
-            subreddit_config: Configuration for the subreddit.
-        
-        Returns:
-            List of post data dictionaries.
+        Fetch top posts from a subreddit using .json endpoint.
         """
         posts = []
-        subreddit = self.reddit.subreddit(subreddit_config.name)
+        url = f"{self.BASE_URL}/r/{subreddit_config.name}/top.json"
+        
+        # Fetch slightly more than needed to account for filtering
+        params = {
+            "t": "month",
+            "limit": min(100, subreddit_config.fetch_count * 2) 
+        }
         
         logger.info(
             f"Fetching from r/{subreddit_config.name}: "
-            f"{subreddit_config.fetch_count} posts, min {subreddit_config.min_upvotes} upvotes"
+            f"Target {subreddit_config.fetch_count} posts, min {subreddit_config.min_upvotes} upvotes"
         )
         
         try:
-            for submission in subreddit.top(time_filter="month", limit=subreddit_config.fetch_count * 2):
-                # Skip if below upvote threshold
-                if submission.score < subreddit_config.min_upvotes:
-                    continue
+            async with session.get(url, headers=self.headers, params=params) as response:
+                if response.status == 429:
+                    logger.warning(f"Rate limited by Reddit on r/{subreddit_config.name}")
+                    return []
                 
-                # Skip deleted/removed posts
-                if submission.removed_by_category or submission.selftext == "[deleted]":
-                    continue
+                if response.status != 200:
+                    logger.error(f"Reddit error {response.status}: {await response.text()}")
+                    return []
                 
-                # Skip NSFW
-                if submission.over_18:
-                    continue
+                data = await response.json()
+                children = data.get("data", {}).get("children", [])
                 
-                # Extract image URL
-                image_url = self._extract_image_url(submission)
-                if not image_url:
-                    continue
-                
-                posts.append({
-                    "id": submission.id,
-                    "title": submission.title,
-                    "subreddit": subreddit_config.name,
-                    "upvotes": submission.score,
-                    "author": str(submission.author) if submission.author else "[deleted]",
-                    "post_url": f"https://reddit.com{submission.permalink}",
-                    "image_url": image_url,
-                    "created_utc": submission.created_utc,
-                })
-                
-                if len(posts) >= subreddit_config.fetch_count:
-                    break
-                
-                # Rate limiting
-                time.sleep(self.config.request_delay)
+                for child in children:
+                    post = child.get("data", {})
+                    
+                    # Skip if below upvote threshold
+                    if post.get("score", 0) < subreddit_config.min_upvotes:
+                        continue
+                    
+                    # Skip deleted/removed posts
+                    if post.get("removed_by_category") or post.get("selftext") == "[deleted]":
+                        continue
+                    
+                    # Skip NSFW
+                    if post.get("over_18"):
+                        continue
+                    
+                    # Extract image URL
+                    image_url = self._extract_image_url(post)
+                    if not image_url:
+                        continue
+                    
+                    posts.append({
+                        "id": post.get("id"),
+                        "title": post.get("title"),
+                        "subreddit": subreddit_config.name,
+                        "upvotes": post.get("score"),
+                        "author": post.get("author", "[deleted]"),
+                        "post_url": f"https://reddit.com{post.get('permalink')}",
+                        "image_url": image_url,
+                        "created_utc": post.get("created_utc"),
+                    })
+                    
+                    if len(posts) >= subreddit_config.fetch_count:
+                        break
         
         except Exception as e:
             logger.error(f"Error fetching from r/{subreddit_config.name}: {e}")
@@ -379,12 +379,15 @@ class RedditFetcher:
         logger.info(f"Fetched {len(posts)} posts from r/{subreddit_config.name}")
         return posts
     
-    def fetch_all(self) -> list[dict[str, Any]]:
+    async def fetch_all(self, session: aiohttp.ClientSession) -> list[dict[str, Any]]:
         """Fetch from all configured subreddits."""
         all_posts = []
         for subreddit_config in self.config.subreddits:
-            posts = self.fetch_subreddit(subreddit_config)
+            # We pass session now since we are async
+            posts = await self.fetch_subreddit(session, subreddit_config)
             all_posts.extend(posts)
+            # Be nice to Reddit's servers
+            await asyncio.sleep(self.config.request_delay)
         return all_posts
 
 
@@ -633,7 +636,8 @@ async def fetch_reddit_candidates(
     fetcher = RedditFetcher(config)
     
     try:
-        posts = fetcher.fetch_all()
+        # Pass session to fetch_all
+        posts = await fetcher.fetch_all(session)
         logger.info(f"Processing {len(posts)} Reddit posts...")
         
         for post in posts:
@@ -839,12 +843,9 @@ async def main() -> list[CandidateWallpaper]:
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         # Fetch from all sources (can be parallelized if needed)
         
-        # Reddit (uses PRAW which is synchronous, but image downloads are async)
-        if config.reddit_client_id and config.reddit_client_secret:
-            logger.info("\n📱 Fetching from Reddit...")
-            reddit_candidates = await fetch_reddit_candidates(config, session, downloader)
-        else:
-            logger.warning("Skipping Reddit: missing API credentials")
+        # Reddit (uses public JSON API)
+        logger.info("\n📱 Fetching from Reddit...")
+        reddit_candidates = await fetch_reddit_candidates(config, session, downloader)
         
         # Unsplash
         if config.unsplash_access_key:

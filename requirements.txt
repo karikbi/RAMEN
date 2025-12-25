@@ -5,7 +5,7 @@
 # =============================================================================
 
 # Reddit API
-praw>=7.7.0
+# Reddit API (Using public JSON, praw removed)
 
 # Async HTTP requests
 aiohttp>=3.9.0

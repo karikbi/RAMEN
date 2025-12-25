@@ -10,15 +10,9 @@ Configure these in your GitHub repository:
 ---
 
 ### Reddit API Credentials
-
-| Secret | Description | How to Get |
-|--------|-------------|------------|
-| `REDDIT_CLIENT_ID` | Reddit app client ID | [Reddit Apps](https://www.reddit.com/prefs/apps) - Create a "script" type app |
-| `REDDIT_CLIENT_SECRET` | Reddit app secret | Same as above |
-| `REDDIT_USER_AGENT` | User agent string | Format: `platform:app_name:version (by /u/username)` |
-
-**Example user agent:** `linux:RAMEN:1.0 (by /u/your_username)`
-
+ 
+**No credentials required.** The pipeline uses public public JSON feeds.
+ 
 ---
 
 ### Stock Photo APIs

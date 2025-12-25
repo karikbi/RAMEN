@@ -107,8 +107,7 @@ cp .env.example .env
 2. **Edit `.env` with your API credentials**
 ```bash
 # Reddit API
-REDDIT_CLIENT_ID=your_client_id
-REDDIT_CLIENT_SECRET=your_client_secret
+# Reddit API (No API keys needed)
 REDDIT_USER_AGENT=platform:app_name:version (by /u/username)
 
 # Stock Photo APIs
@@ -186,9 +185,7 @@ Configure these in **Settings → Secrets and variables → Actions**:
 
 | Secret | Description |
 |--------|-------------|
-| `REDDIT_CLIENT_ID` | Reddit app client ID |
-| `REDDIT_CLIENT_SECRET` | Reddit app secret |
-| `REDDIT_USER_AGENT` | User agent string |
+| `REDDIT_USER_AGENT` | User agent string (optional/default provided) |
 | `UNSPLASH_ACCESS_KEY` | Unsplash API access key |
 | `PEXELS_API_KEY` | Pexels API key |
 | `R2_ENDPOINT` | R2 bucket endpoint URL |
