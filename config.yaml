@@ -1,0 +1,324 @@
+# =============================================================================
+# RAMEN Pipeline Configuration
+# =============================================================================
+#
+# Centralized configuration for the wallpaper curation pipeline.
+# Values can be overridden via environment variables using the format:
+#   RAMEN_<SECTION>_<KEY> (e.g., RAMEN_QUALITY_THRESHOLD=0.90)
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Quality Scoring Configuration
+# -----------------------------------------------------------------------------
+quality:
+  # Minimum score to approve a wallpaper (0.0-1.0)
+  threshold: 0.85
+  
+  # Component weights (must sum to 1.0)
+  weights:
+    visual: 0.40      # Sharpness, exposure, artifacts
+    composition: 0.30 # Rule of thirds, balance, depth
+    aesthetic: 0.20   # Color harmony, contrast, visual interest
+    suitability: 0.10 # Icon readability, brightness for wallpaper use
+
+# -----------------------------------------------------------------------------
+# Source Configuration
+# -----------------------------------------------------------------------------
+sources:
+  reddit:
+    enabled: true
+    subreddits:
+      - name: wallpapers
+        fetch_count: 50
+        min_upvotes: 5000
+      - name: EarthPorn
+        fetch_count: 30
+        min_upvotes: 10000
+      - name: Amoledbackgrounds
+        fetch_count: 30
+        min_upvotes: 3000
+      - name: spaceporn
+        fetch_count: 20
+        min_upvotes: 5000
+      - name: CityPorn
+        fetch_count: 20
+        min_upvotes: 5000
+      - name: SkyPorn
+        fetch_count: 15
+        min_upvotes: 3000
+      - name: ImaginaryLandscapes
+        fetch_count: 15
+        min_upvotes: 3000
+  
+  unsplash:
+    enabled: true
+    count: 30
+    collections:
+      - curated
+      - nature
+      - wallpapers
+  
+  pexels:
+    enabled: true
+    count: 20
+
+# -----------------------------------------------------------------------------
+# Hard Filter Configuration
+# -----------------------------------------------------------------------------
+filters:
+  # Minimum resolution (2560x1440 = 2K)
+  min_width: 2560
+  min_height: 1440
+  
+  # File size limits
+  min_file_size_kb: 200
+  max_file_size_mb: 15
+  
+  # Aspect ratio (16:9 to 21:9)
+  min_aspect_ratio: 1.77  # 16:9
+  max_aspect_ratio: 2.33  # 21:9
+  
+  # Text detection threshold (max allowed text coverage)
+  max_text_coverage: 0.30
+  
+  # Perceptual hash similarity threshold (lower = stricter)
+  phash_threshold: 10
+
+# -----------------------------------------------------------------------------
+# Retry and Timeout Configuration
+# -----------------------------------------------------------------------------
+retry:
+  max_attempts: 3
+  base_delay_sec: 2.0
+  max_delay_sec: 60.0
+  exceptions:
+    - ConnectionError
+    - TimeoutError
+    - TooManyRedirects
+
+timeouts:
+  api_call_sec: 30
+  model_inference_sec: 60
+  upload_sec: 120
+  max_runtime_minutes: 50  # GitHub Actions limit is 60 min
+
+# -----------------------------------------------------------------------------
+# Storage Configuration
+# -----------------------------------------------------------------------------
+storage:
+  manifests_dir: ./manifests
+  temp_dir: ./temp
+  logs_dir: ./logs
+  reports_dir: ./reports
+  models_dir: ./models
+  
+  # R2 bucket (from environment)
+  r2_bucket: ${R2_BUCKET_NAME}
+  r2_custom_domain: ${R2_CUSTOM_DOMAIN}
+
+# -----------------------------------------------------------------------------
+# Model Configuration
+# -----------------------------------------------------------------------------
+models:
+  cache_dir: ./models
+  
+  # Batch size for GPU inference
+  batch_size: 4
+  
+  # Models to use for embedding extraction
+  enabled:
+    - mobilenet_v3      # 576-dim, fast
+    - efficientnet_v2   # 1280-dim, high quality
+    - siglip            # 1152-dim, semantic understanding
+    - dinov2            # 1024-dim, visual features
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # Separate log files per stage
+  stage_logs: true
+  
+  # Rotate logs older than this many days
+  rotate_days: 30
+  
+  # Keep compressed archives of old logs
+  compress_old: true
+
+# -----------------------------------------------------------------------------
+# Category Definitions
+# -----------------------------------------------------------------------------
+categories:
+  nature:
+    keywords:
+      - landscape
+      - mountain
+      - forest
+      - ocean
+      - beach
+      - lake
+      - river
+      - waterfall
+      - sunset
+      - sunrise
+    subreddits:
+      - EarthPorn
+      - natureporn
+      - SkyPorn
+  
+  urban:
+    keywords:
+      - city
+      - cityscape
+      - building
+      - architecture
+      - street
+      - skyline
+      - night city
+    subreddits:
+      - CityPorn
+      - ArchitecturePorn
+  
+  space:
+    keywords:
+      - galaxy
+      - nebula
+      - stars
+      - cosmos
+      - planet
+      - moon
+      - aurora
+    subreddits:
+      - spaceporn
+      - astrophotography
+  
+  abstract:
+    keywords:
+      - abstract
+      - minimalist
+      - geometric
+      - pattern
+      - gradient
+      - amoled
+      - dark
+    subreddits:
+      - Amoledbackgrounds
+      - minimalist
+  
+  art:
+    keywords:
+      - digital art
+      - illustration
+      - painting
+      - fantasy
+      - concept art
+    subreddits:
+      - ImaginaryLandscapes
+      - DigitalArt
+
+# -----------------------------------------------------------------------------
+# Manifest Optimization
+# -----------------------------------------------------------------------------
+manifest:
+  # Use gzip compression for manifest files
+  compress: true
+  
+  # Minify JSON (no pretty printing) in production
+  minify: false
+  
+  # Max entries per delta file
+  delta_max_entries: 100
+  
+  # Fields to include in manifest (others stored separately)
+  core_fields:
+    - id
+    - title
+    - r2_url
+    - quality_score
+    - primary_category
+    - color_palette
+    - dominant_hue
+    - date_added
+
+# -----------------------------------------------------------------------------
+# Metrics and Monitoring
+# -----------------------------------------------------------------------------
+metrics:
+  enabled: true
+  file: ./metrics.json
+  
+  # Track these metrics over time
+  track:
+    - acceptance_rate
+    - avg_quality_score
+    - processing_time_sec
+    - api_success_rate
+    - category_distribution
+  
+  # Anomaly detection thresholds
+  anomaly:
+    quality_drop: 0.05      # Warn if avg drops by this much
+    time_increase: 2.0      # Warn if processing time doubles
+    api_failure_rate: 0.20  # Warn if >20% API failures
+
+# -----------------------------------------------------------------------------
+# Deduplication Configuration
+# -----------------------------------------------------------------------------
+deduplication:
+  enabled: true
+  
+  # URL deduplication (prevent re-fetching same URLs)
+  track_urls: true
+  url_index_size: 100000  # Max URLs to track
+  
+  # Perceptual hash settings
+  phash_threshold: 10     # Hamming distance (lower = stricter)
+  
+  # Content hash (exact binary match via SHA256)
+  content_hash: true
+  
+  # Bloom filter for fast screening
+  bloom_filter:
+    expected_items: 50000
+    false_positive_rate: 0.01
+  
+  # Sync to R2 for persistence across runs
+  sync_to_r2: true
+  r2_index_key: "dedup/index.json.gz"
+
+# -----------------------------------------------------------------------------
+# Batch Operation Configuration
+# -----------------------------------------------------------------------------
+batching:
+  # Upload batching (to avoid Cloudflare free tier limits)
+  upload:
+    batch_size: 100          # Files per batch
+    inter_batch_delay: 1.0   # Seconds between batches
+    max_concurrent: 5        # Concurrent uploads within batch
+    retry_failed: true       # Retry failed at end
+    max_retries: 3           # Max retry attempts per file
+  
+  # Manifest operations
+  manifest:
+    cache_local: true        # Keep local cache
+    cache_ttl_hours: 24      # Local cache TTL
+
+# -----------------------------------------------------------------------------
+# Smoke Test Configuration (for PR checks)
+# -----------------------------------------------------------------------------
+smoke_test:
+  # Minimal fetch for quick validation
+  reddit_count: 3
+  unsplash_count: 2
+  pexels_count: 0
+  
+  # Skip R2 upload
+  skip_upload: true
+  
+  # Max runtime
+  max_runtime_sec: 120
+

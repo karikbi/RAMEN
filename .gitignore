@@ -1,0 +1,242 @@
+# RAMEN Pipeline - Git Ignore File
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# =============================================================================
+# Environment Variables & Secrets
+# =============================================================================
+.env
+.env.local
+.env.*.local
+secrets.yaml
+credentials.json
+
+# =============================================================================
+# Temporary Files & Downloads
+# =============================================================================
+temp/
+tmp/
+*.tmp
+*.temp
+downloads/
+candidates/
+approved/
+
+# Logs
+logs/
+*.log
+
+# =============================================================================
+# Machine Learning Models & Caches
+# =============================================================================
+models/
+*.h5
+*.pb
+*.pt
+*.pth
+*.onnx
+*.tflite
+model_cache/
+.transformers_cache/
+.cache/
+
+# TensorFlow
+*.ckpt
+*.ckpt.data-*
+*.ckpt.index
+*.ckpt.meta
+checkpoint
+
+# PyTorch
+*.pth.tar
+
+# =============================================================================
+# Data Files
+# =============================================================================
+# Exclude large data files but keep manifests
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+*.bmp
+*.tiff
+
+# Keep example images
+!examples/*.jpg
+!examples/*.png
+!assets/*.jpg
+!assets/*.png
+
+# Exclude manifests from temp directories
+temp/manifests/
+temp/*.json
+
+# Keep production manifests
+!manifests/*.json
+!manifests/README.md
+
+# =============================================================================
+# IDE & Editor Files
+# =============================================================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# =============================================================================
+# OS Files
+# =============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# =============================================================================
+# Project Specific
+# =============================================================================
+# Benchmark results
+benchmark_results/
+*.benchmark
+
+# Validation reports
+validation_reports/
+*.report
+
+# Statistics
+stats/
+metrics/
+
+# Backup files
+*.bak
+*.backup
+backup/
+
+# =============================================================================
+# R2 Storage Cache & Dedup Index
+# =============================================================================
+# Local manifest cache (manifests are stored on R2)
+manifest_cache/
+
+# Dedup index cache
+dedup_cache/
+
+# Pipeline state (for crash recovery)
+pipeline_state/
+
+# Hash files (now stored on R2)
+existing_hashes.json
+source_stats.json
+
+# =============================================================================
+# GitHub Actions
+# =============================================================================
+# Don't ignore workflows
+!.github/workflows/
+!.github/SECRETS.md
+
+# =============================================================================
+# Documentation Build
+# =============================================================================
+docs/_build/
+docs/_static/
+docs/_templates/
+site/
+
+# =============================================================================
+# Jupyter Notebooks
+# =============================================================================
+.ipynb_checkpoints/
+*.ipynb
+
+# =============================================================================
+# Miscellaneous
+# =============================================================================
+TODO.md
+NOTES.md
+scratch/

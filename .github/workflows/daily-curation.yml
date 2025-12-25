@@ -1,0 +1,551 @@
+# =============================================================================
+# RAMEN Daily Wallpaper Curation Pipeline
+# =============================================================================
+# 
+# Automated pipeline that runs daily at 2 AM IST (20:30 UTC previous day):
+# - Fetches wallpaper candidates from Reddit, Unsplash, Pexels
+# - Applies hard filters (resolution, text, duplicates)
+# - Scores quality using 4-model system
+# - Uploads approved wallpapers to Cloudflare R2
+# - Updates manifest and commits to repository
+#
+# Reference: RAMENStrategy.md
+# =============================================================================
+
+name: Daily Wallpaper Curation
+
+on:
+  # Daily cron at 2 AM IST = 20:30 UTC (previous day)
+  schedule:
+    - cron: '30 20 * * *'
+  
+  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      quality_threshold:
+        description: 'Quality threshold (0.0-1.0)'
+        required: false
+        default: '0.85'
+      dry_run:
+        description: 'Dry run (no uploads/commits)'
+        required: false
+        type: boolean
+        default: false
+      debug:
+        description: 'Enable debug logging'
+        required: false
+        type: boolean
+        default: false
+  
+  # Trigger on workflow file changes (for testing)
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/daily-curation.yml'
+
+# Ensure only one workflow runs at a time
+concurrency:
+  group: daily-curation
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.11'
+  MODELS_CACHE_KEY: 'models-v1'
+  PIP_CACHE_KEY: 'pip-v1'
+
+jobs:
+  curate:
+    name: Curate Wallpapers
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    # Outputs for subsequent jobs or reporting
+    outputs:
+      candidates_count: ${{ steps.run-pipeline.outputs.candidates }}
+      approved_count: ${{ steps.run-pipeline.outputs.approved }}
+      rejected_count: ${{ steps.run-pipeline.outputs.rejected }}
+      run_status: ${{ steps.run-pipeline.outputs.status }}
+    
+    steps:
+      # =========================================================================
+      # REPOSITORY CHECKOUT
+      # =========================================================================
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+      
+      # =========================================================================
+      # PYTHON SETUP WITH CACHING
+      # =========================================================================
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+      
+      # =========================================================================
+      # SYSTEM DEPENDENCIES
+      # =========================================================================
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr \
+            libtesseract-dev \
+            libopencv-dev \
+            python3-opencv \
+            libgl1-mesa-glx \
+            libglib2.0-0 \
+            libsm6 \
+            libxext6 \
+            libxrender-dev \
+            libfontconfig1
+      
+      # =========================================================================
+      # PYTHON DEPENDENCIES WITH CACHING
+      # =========================================================================
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        id: pip-cache
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ env.PIP_CACHE_KEY }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ env.PIP_CACHE_KEY }}-
+            ${{ runner.os }}-pip-
+      
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      # =========================================================================
+      # ML MODELS CACHING (Saves ~5-10 minutes per run)
+      # =========================================================================
+      - name: Cache ML Models
+        uses: actions/cache@v4
+        id: models-cache
+        with:
+          path: |
+            ./models
+            ~/.cache/huggingface
+            ~/.cache/torch
+          key: ${{ runner.os }}-${{ env.MODELS_CACHE_KEY }}-models
+          restore-keys: |
+            ${{ runner.os }}-${{ env.MODELS_CACHE_KEY }}-
+      
+      - name: Download ML Models (if not cached)
+        if: steps.models-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "📥 Downloading ML models (not found in cache)..."
+          python -c "
+          import os
+          os.makedirs('./models', exist_ok=True)
+          
+          # Pre-download TensorFlow models
+          print('Loading TensorFlow models...')
+          import tensorflow as tf
+          from tensorflow.keras.applications import MobileNetV3Small, EfficientNetV2L
+          MobileNetV3Small(weights='imagenet', include_top=False, pooling='avg')
+          EfficientNetV2L(weights='imagenet', include_top=False, pooling='avg')
+          
+          # Pre-download PyTorch/HuggingFace models
+          print('Loading PyTorch/HuggingFace models...')
+          from transformers import AutoModel, AutoProcessor
+          AutoProcessor.from_pretrained('google/siglip-large-patch16-256')
+          AutoModel.from_pretrained('google/siglip-large-patch16-256')
+          
+          import torch
+          torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14')
+          
+          print('✅ All models downloaded successfully!')
+          "
+        env:
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          TRANSFORMERS_CACHE: ~/.cache/huggingface
+          TORCH_HOME: ~/.cache/torch
+      
+      # =========================================================================
+      # RCLONE SETUP FOR R2 UPLOADS
+      # =========================================================================
+      - name: Cache rclone config
+        uses: actions/cache@v4
+        id: rclone-cache
+        with:
+          path: ~/.config/rclone
+          key: ${{ runner.os }}-rclone-config
+      
+      - name: Install and Configure rclone
+        run: |
+          # Install rclone
+          curl https://rclone.org/install.sh | sudo bash
+          
+          # Configure rclone for Cloudflare R2
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY }}
+          secret_access_key = ${{ secrets.R2_SECRET_KEY }}
+          endpoint = ${{ secrets.R2_ENDPOINT }}
+          acl = private
+          no_check_bucket = true
+          EOF
+          
+          echo "✅ rclone configured for Cloudflare R2"
+      
+      # =========================================================================
+      # CREATE TEMP DIRECTORIES
+      # =========================================================================
+      - name: Create Working Directories
+        run: |
+          mkdir -p ./temp/candidates
+          mkdir -p ./temp/approved
+          mkdir -p ./logs
+          mkdir -p ./reports
+
+      # =========================================================================
+      # RUN MAIN CURATION PIPELINE
+      # =========================================================================
+      - name: Run Curation Pipeline
+        id: run-pipeline
+        run: |
+          echo "🚀 Starting RAMEN Wallpaper Curation Pipeline..."
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "================================================"
+          
+          # Set quality threshold from input or default
+          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.85' }}"
+          DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+          DEBUG="${{ github.event.inputs.debug || 'false' }}"
+          
+          # Build command with optional flags
+          CMD="python pipeline_complete.py --quality-threshold $QUALITY_THRESHOLD --max-runtime 50"
+          
+          if [ "$DRY_RUN" = "true" ]; then
+            CMD="$CMD --dry-run"
+          fi
+          
+          if [ "$DEBUG" = "true" ]; then
+            CMD="$CMD --debug"
+          fi
+          
+          echo "Running: $CMD"
+          
+          # Run pipeline and capture output
+          set +e
+          $CMD 2>&1 | tee ./logs/pipeline_$(date +%Y%m%d_%H%M%S).log
+          PIPELINE_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          
+          # Parse results from statistics file if exists
+          if [ -f "./reports/statistics.json" ]; then
+            CANDIDATES=$(jq -r '.candidates_total // 0' ./reports/statistics.json)
+            APPROVED=$(jq -r '.approved_total // 0' ./reports/statistics.json)
+            REJECTED=$(jq -r '.rejected_total // 0' ./reports/statistics.json)
+          else
+            CANDIDATES=0
+            APPROVED=0
+            REJECTED=0
+          fi
+          
+          echo "candidates=$CANDIDATES" >> $GITHUB_OUTPUT
+          echo "approved=$APPROVED" >> $GITHUB_OUTPUT
+          echo "rejected=$REJECTED" >> $GITHUB_OUTPUT
+          
+          if [ $PIPELINE_EXIT_CODE -eq 0 ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "✅ Pipeline completed successfully!"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "❌ Pipeline failed with exit code: $PIPELINE_EXIT_CODE"
+          fi
+          
+          # Summary for workflow
+          echo "## Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Candidates Fetched | $CANDIDATES |" >> $GITHUB_STEP_SUMMARY
+          echo "| Wallpapers Approved | $APPROVED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Wallpapers Rejected | $REJECTED |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          
+          exit $PIPELINE_EXIT_CODE
+        env:
+          # Reddit API
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
+          # Stock Photo APIs
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          # Cloudflare R2 Storage
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          # Model caching
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          TRANSFORMERS_CACHE: ~/.cache/huggingface
+          TORCH_HOME: ~/.cache/torch
+        continue-on-error: false
+      
+      # =========================================================================
+      # POST-PIPELINE VALIDATION
+      # =========================================================================
+      - name: Validate Collection
+        if: success()
+        run: |
+          echo "🔍 Running post-pipeline validation..."
+          python validate_collection.py --quick-check --manifests-dir ./manifests --output ./reports/validation_report.json || {
+            echo "⚠️ Validation found issues - check report"
+          }
+          
+          # Add validation info to summary
+          if [ -f "./reports/validation_report.json" ]; then
+            PASSED=$(jq -r '.overall_passed' ./reports/validation_report.json)
+            TOTAL=$(jq -r '.total_wallpapers' ./reports/validation_report.json)
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Validation Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            if [ "$PASSED" = "true" ]; then
+              echo "✅ **Collection validation passed** ($TOTAL wallpapers)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️ **Validation found issues** - check validation_report.json" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+      
+      # =========================================================================
+      # COMMIT UPDATED MANIFESTS
+      # =========================================================================
+      - name: Commit Manifest Updates
+        if: success() && github.event.inputs.dry_run != 'true'
+        run: |
+          echo "📝 Committing manifest updates..."
+          
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Check for changes
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+          
+          # Add manifest files
+          git add manifests/ || true
+          git add reports/statistics.json || true
+          git add reports/validation_report.json || true
+          git add metrics.json || true
+          git add logs/*.log || true
+          
+          # Create commit message with stats
+          APPROVED="${{ steps.run-pipeline.outputs.approved }}"
+          DATE=$(date -u '+%Y-%m-%d')
+          
+          git commit -m "🎨 Daily curation: +${APPROVED} wallpapers ($DATE)" \
+                     -m "" \
+                     -m "Automated by RAMEN Pipeline" \
+                     -m "Candidates: ${{ steps.run-pipeline.outputs.candidates }}" \
+                     -m "Approved: ${{ steps.run-pipeline.outputs.approved }}" \
+                     -m "Rejected: ${{ steps.run-pipeline.outputs.rejected }}" || true
+          
+          # Push changes
+          git push origin main
+          echo "✅ Manifest updates committed and pushed."
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+      
+      # =========================================================================
+      # UPLOAD ARTIFACTS FOR DEBUGGING
+      # =========================================================================
+      - name: Upload Pipeline Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs-${{ github.run_number }}
+          path: ./logs/
+          retention-days: 30
+          if-no-files-found: ignore
+      
+      - name: Upload Daily Report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report-${{ github.run_number }}
+          path: |
+            ./reports/daily_report_*.md
+            ./reports/statistics.json
+          retention-days: 30
+          if-no-files-found: ignore
+      
+      - name: Upload Rejected Wallpapers Info
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rejected-analysis-${{ github.run_number }}
+          path: ./reports/rejected_*.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ===========================================================================
+  # FAILURE HANDLING - Create GitHub Issue
+  # ===========================================================================
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: curate
+    if: failure()
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Download Logs Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-logs-${{ github.run_number }}
+          path: ./logs
+        continue-on-error: true
+      
+      - name: Create Failure Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const date = new Date().toISOString().split('T')[0];
+            
+            // Try to read last log file
+            let logContent = 'No logs available';
+            try {
+              const logDir = './logs';
+              if (fs.existsSync(logDir)) {
+                const files = fs.readdirSync(logDir).filter(f => f.endsWith('.log'));
+                if (files.length > 0) {
+                  const latestLog = files.sort().pop();
+                  const fullLog = fs.readFileSync(`${logDir}/${latestLog}`, 'utf8');
+                  // Truncate to last 2000 chars
+                  logContent = fullLog.slice(-2000);
+                }
+              }
+            } catch (e) {
+              console.log('Could not read logs:', e);
+            }
+            
+            const body = `## 🔴 Daily Curation Pipeline Failed
+            
+            **Run Date:** ${date}
+            **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            
+            ### Run Details
+            - **Candidates Fetched:** ${{ needs.curate.outputs.candidates_count || 'N/A' }}
+            - **Status:** ${{ needs.curate.outputs.run_status || 'failed' }}
+            
+            ### Last Log Output
+            \`\`\`
+            ${logContent}
+            \`\`\`
+            
+            ### Action Required
+            Please investigate the failure and take appropriate action:
+            1. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            2. Verify all secrets are properly configured
+            3. Check API rate limits for Reddit/Unsplash/Pexels
+            4. Verify R2 bucket accessibility
+            
+            ---
+            *This issue was automatically created by the RAMEN pipeline.*
+            `;
+            
+            // Check for existing open issues
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'pipeline-failure',
+              state: 'open'
+            });
+            
+            if (existingIssues.data.length > 0) {
+              // Update existing issue with comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssues.data[0].number,
+                body: `## Additional Failure on ${date}\n\n${body}`
+              });
+              console.log(`Updated existing issue #${existingIssues.data[0].number}`);
+            } else {
+              // Create new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔴 Daily Curation Pipeline Failed - ${date}`,
+                body: body,
+                labels: ['pipeline-failure', 'automated']
+              });
+              console.log('Created new failure issue');
+            }
+
+  # ===========================================================================
+  # SUCCESS NOTIFICATION - Update Summary
+  # ===========================================================================
+  notify-success:
+    name: Post Success Summary
+    runs-on: ubuntu-latest
+    needs: curate
+    if: success()
+    
+    steps:
+      - name: Post Summary to Workflow
+        run: |
+          echo "## ✅ Daily Curation Completed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Candidates Fetched | ${{ needs.curate.outputs.candidates_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Wallpapers Approved | ${{ needs.curate.outputs.approved_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Wallpapers Rejected | ${{ needs.curate.outputs.rejected_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Manifests have been updated and committed to the repository." >> $GITHUB_STEP_SUMMARY
+      
+      - name: Close Old Pipeline Failure Issues
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'pipeline-failure',
+              state: 'open'
+            });
+            
+            for (const issue of issues.data) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: '✅ Pipeline is now working. Issue auto-closed.'
+              });
+              
+              console.log(`Closed issue #${issue.number}`);
+            }
