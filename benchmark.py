@@ -241,23 +241,24 @@ class PipelineBenchmark:
         )
     
     def benchmark_quality_scoring(self, image_paths: list[Path]) -> BenchmarkResult:
-        """Benchmark quality scoring."""
-        from quality_scorer import QualityScorer
+        """Benchmark quality scoring (using ML-based scorer)."""
+        from ml_quality_scorer import MLQualityScorer
         
-        scorer = QualityScorer()
+        scorer = MLQualityScorer()
         
         def run_scoring():
             scores = []
             for path in image_paths:
-                score = scorer.calculate_quality_score(path)
+                score = scorer.score(path)
                 scores.append(score)
             return scores
         
         return self.time_function(
             run_scoring,
-            "Quality Scoring",
+            "Quality Scoring (ML)",
             items_count=len(image_paths)
         )
+
     
     def benchmark_metadata_generation(self, image_paths: list[Path]) -> BenchmarkResult:
         """Benchmark metadata generation."""

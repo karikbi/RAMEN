@@ -33,10 +33,10 @@ from pipeline_part2 import (
     ApprovedWallpaper,
     FilteringStats,
     FilterConfig,
-    QualityConfig
 )
 from filters import FilterConfig
-from quality_scorer import QualityConfig
+from ml_quality_scorer import MLQualityConfig
+
 
 # Part 3 imports
 from r2_storage import (
@@ -227,8 +227,8 @@ class WallpaperCurationPipeline:
         
         start = time.time()
         
-        # Configure filtering
-        quality_config = QualityConfig(quality_threshold=self.quality_threshold)
+        # Configure filtering with ML quality scoring
+        quality_config = MLQualityConfig(threshold=self.quality_threshold)
         
         # Run filtering pipeline
         pipeline = FilteringPipeline(
