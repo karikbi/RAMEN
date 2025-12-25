@@ -7,12 +7,32 @@ Extracts embeddings from 4 models: MobileNetV3, EfficientNetV2, SigLIP, and DINO
 
 import logging
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 from PIL import Image
+
+# ============================================================================
+# WARNING SUPPRESSIONS
+# ============================================================================
+
+# Suppress numpy deprecated warnings from keras (np.object, np.bool, etc.)
+warnings.filterwarnings("ignore", message=".*`np.object` is a deprecated alias.*")
+warnings.filterwarnings("ignore", message=".*`np.bool` is a deprecated alias.*")
+warnings.filterwarnings("ignore", category=FutureWarning, module="keras")
+
+# Suppress xFormers warnings from DINOv2
+warnings.filterwarnings("ignore", message="xFormers is not available")
+
+# Suppress slow image processor warning from transformers
+warnings.filterwarnings("ignore", message=".*slow image processor.*")
+warnings.filterwarnings("ignore", message=".*use_fast.*is unset.*")
+
+# Increase PIL pixel limit to prevent DecompressionBomb warnings for large wallpapers
+Image.MAX_IMAGE_PIXELS = 200_000_000  # 200 megapixels (up from ~89MP default)
 
 logger = logging.getLogger("wallpaper_curator")
 
@@ -21,9 +41,9 @@ MODELS_DIR = Path("./models")
 MODELS_DIR.mkdir(exist_ok=True)
 
 # Set cache directories before importing ML libraries
-os.environ["TRANSFORMERS_CACHE"] = str(MODELS_DIR / "transformers")
-os.environ["TORCH_HOME"] = str(MODELS_DIR / "torch")
+# Use HF_HOME instead of deprecated TRANSFORMERS_CACHE
 os.environ["HF_HOME"] = str(MODELS_DIR / "huggingface")
+os.environ["TORCH_HOME"] = str(MODELS_DIR / "torch")
 
 
 @dataclass
@@ -199,7 +219,7 @@ class EmbeddingExtractor:
                 import torch
                 
                 model_name = "google/siglip-large-patch16-384"
-                self._siglip_processor = AutoProcessor.from_pretrained(model_name)
+                self._siglip_processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
                 self._siglip_model = AutoModel.from_pretrained(model_name)
                 
                 if self.device == "cuda":

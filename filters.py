@@ -16,6 +16,9 @@ from typing import Optional, Tuple
 import imagehash
 from PIL import Image
 
+# Increase PIL pixel limit to prevent DecompressionBomb warnings for large wallpapers
+Image.MAX_IMAGE_PIXELS = 200_000_000  # 200 megapixels
+
 # Try to import pytesseract, but make it optional
 try:
     import pytesseract

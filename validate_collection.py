@@ -87,13 +87,14 @@ class CollectionValidator:
     - Perceptual hash collisions
     """
     
+    # Required fields with aliases (field, [aliases]) - any of the names is valid
     REQUIRED_FIELDS = [
-        "id",
-        "title", 
-        "r2_url",
-        "quality_score",
-        "primary_category",
-        "date_added",
+        ("id", []),
+        ("title", []),
+        ("r2_url", ["url"]),  # Accept 'url' as alias for 'r2_url'
+        ("quality_score", []),
+        ("primary_category", ["category"]),  # Accept 'category' as alias
+        ("date_added", []),
     ]
     
     EMBEDDING_DIMENSIONS = {
@@ -155,14 +156,19 @@ class CollectionValidator:
     # =========================================================================
     
     def check_required_fields(self) -> ValidationResult:
-        """Check all wallpapers have required fields."""
+        """Check all wallpapers have required fields (with alias support)."""
         errors = []
         missing_counts = {}
         
         for wp in self.collection:
             wp_id = wp.get("id", "unknown")
-            for field in self.REQUIRED_FIELDS:
-                if field not in wp or wp[field] is None:
+            for field, aliases in self.REQUIRED_FIELDS:
+                # Check if field or any alias is present and not None
+                has_field = (
+                    (field in wp and wp[field] is not None and wp[field] != "") or
+                    any(alias in wp and wp[alias] is not None and wp[alias] != "" for alias in aliases)
+                )
+                if not has_field:
                     errors.append(f"{wp_id}: missing '{field}'")
                     missing_counts[field] = missing_counts.get(field, 0) + 1
         
@@ -334,7 +340,8 @@ class CollectionValidator:
         no_category = 0
         
         for wp in self.collection:
-            category = wp.get("primary_category", "")
+            # Check both primary_category and category (alias) for backwards compatibility
+            category = wp.get("primary_category", "") or wp.get("category", "")
             if category:
                 categories[category] = categories.get(category, 0) + 1
             else:

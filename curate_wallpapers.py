@@ -57,16 +57,16 @@ class Config:
     # Quality thresholds
     quality_threshold: float = 0.70  # Lowered from 0.85
     
-    # Subreddit configurations - increased counts, lowered upvote requirements
+    # Subreddit configurations - lowered upvote requirements for more candidates
     subreddits: list[SubredditConfig] = field(default_factory=lambda: [
-        SubredditConfig("wallpapers", 100, 1000),     # High volume
-        SubredditConfig("EarthPorn", 80, 2000),       # Nature
-        SubredditConfig("Amoledbackgrounds", 60, 300), # Mobile-friendly
-        SubredditConfig("spaceporn", 50, 1000),       # Space
-        SubredditConfig("CityPorn", 50, 1000),        # Urban
-        SubredditConfig("SkyPorn", 40, 500),          # Sky
-        SubredditConfig("MinimalWallpaper", 40, 200), # Minimal
-        SubredditConfig("ImaginaryLandscapes", 40, 500), # Art
+        SubredditConfig("wallpapers", 100, 100),       # Was 1000 - got 0
+        SubredditConfig("EarthPorn", 80, 500),         # Working well
+        SubredditConfig("Amoledbackgrounds", 60, 50),  # Was 300 - got 6
+        SubredditConfig("spaceporn", 50, 200),         # Working well
+        SubredditConfig("CityPorn", 50, 200),          # Working well
+        SubredditConfig("SkyPorn", 40, 100),           # Was 500 - got 16
+        SubredditConfig("MinimalWallpaper", 40, 20),   # Was 200 - got 0
+        SubredditConfig("ImaginaryLandscapes", 40, 100), # Was 500 - got 4
     ])
     
     # Candidate counts per source - increased for more wallpapers

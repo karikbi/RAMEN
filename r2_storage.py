@@ -802,7 +802,7 @@ class R2ManifestManager:
                 Key=r2_key,
                 Body=data,
                 ContentType=content_type,
-                ContentEncoding="gzip",
+                # Note: Removed ContentEncoding to avoid boto3 checksum mismatch
                 CacheControl="public, max-age=3600"  # 1 hour cache
             )
             

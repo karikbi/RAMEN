@@ -102,7 +102,9 @@ class ManifestManager:
             "id": wallpaper.id,
             "title": wallpaper.title,
             "url": r2_url or str(wallpaper.filepath),
+            "r2_url": r2_url or "",  # Explicit R2 URL for validation
             "category": meta.primary_category,
+            "primary_category": meta.primary_category,  # Explicit for validation
             "subcategories": meta.subcategories,
             "colors": meta.color_palette,
             "dominant_hue": meta.dominant_hue,

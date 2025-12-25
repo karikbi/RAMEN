@@ -528,8 +528,9 @@ class R2DedupSync:
                 Bucket=self.bucket,
                 Key=self.index_key,
                 Body=compressed_data,
-                ContentType="application/gzip",
-                ContentEncoding="gzip"
+                ContentType="application/gzip"
+                # Note: Removed ContentEncoding to avoid boto3 checksum mismatch
+                # The file is stored as compressed bytes (.gz extension indicates compression)
             )
             
             stats = index.get_stats()

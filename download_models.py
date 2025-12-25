@@ -12,6 +12,11 @@ and avoid re-downloading them on every run.
 
 import os
 import sys
+import warnings
+
+# Suppress warnings during model download
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*`np.object` is a deprecated alias.*")
 
 
 def main():
@@ -19,10 +24,21 @@ def main():
     print("📥 Downloading ML models for RAMEN pipeline...")
     print("=" * 60)
     
+    # Set cache directories to match GitHub Actions paths
+    # These should align with the workflow's HF_HOME and TORCH_HOME env vars
+    hf_cache = os.environ.get('HF_HOME', os.path.expanduser('~/.cache/huggingface'))
+    torch_cache = os.environ.get('TORCH_HOME', os.path.expanduser('~/.cache/torch'))
+    
+    os.environ['HF_HOME'] = hf_cache
+    os.environ['TORCH_HOME'] = torch_cache
+    
+    print(f"HF_HOME: {hf_cache}")
+    print(f"TORCH_HOME: {torch_cache}")
+    
     # Create cache directories
     os.makedirs('./models', exist_ok=True)
-    os.makedirs(os.path.expanduser('~/.cache/huggingface'), exist_ok=True)
-    os.makedirs(os.path.expanduser('~/.cache/torch'), exist_ok=True)
+    os.makedirs(hf_cache, exist_ok=True)
+    os.makedirs(torch_cache, exist_ok=True)
     
     try:
         # =====================================================================

@@ -31,29 +31,29 @@ sources:
     enabled: true
     subreddits:
       - name: wallpapers
-        fetch_count: 100  # High volume
-        min_upvotes: 1000  # Lowered from 5000
+        fetch_count: 100
+        min_upvotes: 100   # Lowered from 1000
       - name: EarthPorn
-        fetch_count: 80   # Nature
-        min_upvotes: 2000  # Lowered from 10000
+        fetch_count: 80
+        min_upvotes: 500   # Working well
       - name: Amoledbackgrounds
-        fetch_count: 60   # Mobile-friendly
-        min_upvotes: 300   # Lowered from 3000
+        fetch_count: 60
+        min_upvotes: 50    # Lowered from 300
       - name: spaceporn
-        fetch_count: 50   # Space
-        min_upvotes: 1000  # Lowered from 5000
+        fetch_count: 50
+        min_upvotes: 200   # Working well
       - name: CityPorn
-        fetch_count: 50   # Urban
-        min_upvotes: 1000  # Lowered from 5000
+        fetch_count: 50
+        min_upvotes: 200   # Lowered from 1000
       - name: SkyPorn
-        fetch_count: 40   # Sky
-        min_upvotes: 500   # Lowered from 3000
+        fetch_count: 40
+        min_upvotes: 100   # Lowered from 500
       - name: MinimalWallpaper
-        fetch_count: 40   # Minimal
-        min_upvotes: 200
+        fetch_count: 40
+        min_upvotes: 20    # Lowered from 200
       - name: ImaginaryLandscapes
-        fetch_count: 40   # Art
-        min_upvotes: 500   # Lowered from 3000
+        fetch_count: 40
+        min_upvotes: 100   # Lowered from 500
   
   unsplash:
     enabled: true

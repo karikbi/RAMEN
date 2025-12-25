@@ -41,6 +41,11 @@ on:
         required: false
         type: boolean
         default: false
+      clear_r2:
+        description: '⚠️ DANGER: Clear ALL R2 data (manifests, wallpapers, dedup index)'
+        required: false
+        type: boolean
+        default: false
   
   # Trigger on workflow file changes (for testing)
   push:
@@ -211,6 +216,53 @@ jobs:
           
           echo "✅ rclone configured for Cloudflare R2"
       
+      # =========================================================================
+      # CLEAR R2 DATA (OPTIONAL - DANGER ZONE)
+      # =========================================================================
+      - name: Clear All R2 Data
+        if: github.event.inputs.clear_r2 == 'true'
+        run: |
+          echo "⚠️ =========================================="
+          echo "⚠️ CLEARING ALL R2 DATA - FRESH START"
+          echo "⚠️ =========================================="
+          
+          BUCKET="${{ secrets.R2_BUCKET_NAME }}"
+          
+          echo "📁 Listing current R2 contents..."
+          rclone ls r2:$BUCKET --max-depth 2 | head -20 || echo "Bucket may be empty"
+          
+          echo ""
+          echo "🗑️ Deleting manifests..."
+          rclone delete r2:$BUCKET/manifests/ --verbose 2>&1 || echo "No manifests to delete"
+          
+          echo "🗑️ Deleting wallpaper images..."
+          rclone delete r2:$BUCKET/2025/ --verbose 2>&1 || echo "No 2025 wallpapers to delete"
+          rclone delete r2:$BUCKET/2024/ --verbose 2>&1 || echo "No 2024 wallpapers to delete"
+          
+          echo "🗑️ Deleting dedup index..."
+          rclone delete r2:$BUCKET/dedup/ --verbose 2>&1 || echo "No dedup data to delete"
+          
+          echo ""
+          echo "📁 R2 contents after cleanup:"
+          rclone ls r2:$BUCKET --max-depth 2 || echo "Bucket is now empty"
+          
+          echo ""
+          echo "🧹 Clearing local manifest files..."
+          rm -rf manifests/*.json.gz manifests/*.json 2>/dev/null || true
+          rm -f existing_hashes.json source_stats.json 2>/dev/null || true
+          
+          echo "✅ R2 and local data cleared - ready for fresh start!"
+          echo ""
+          
+          # Add summary
+          echo "## ⚠️ R2 Data Cleared" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All data has been deleted from R2 bucket:" >> $GITHUB_STEP_SUMMARY
+          echo "- Manifests" >> $GITHUB_STEP_SUMMARY
+          echo "- Wallpaper images" >> $GITHUB_STEP_SUMMARY
+          echo "- Dedup index" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next run will start with a completely fresh collection.**" >> $GITHUB_STEP_SUMMARY
 
       # =========================================================================
       # RUN MAIN CURATION PIPELINE
