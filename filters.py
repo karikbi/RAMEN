@@ -45,8 +45,8 @@ class FilterConfig:
     min_height: int = 1440
     min_file_size: int = 200 * 1024  # 200KB
     max_file_size: int = 15 * 1024 * 1024  # 15MB
-    min_aspect_ratio: float = 16 / 9  # ~1.78
-    max_aspect_ratio: float = 21 / 9  # ~2.33
+    min_aspect_ratio: float = 0.5  # Portrait minimum (e.g., 9:16)
+    max_aspect_ratio: float = 3.0  # Ultra-wide maximum (e.g., 21:9)
     max_text_coverage: float = 0.30  # 30%
     hash_similarity_threshold: int = 10  # Hamming distance (lower = more similar)
     rejected_dir: Path = Path("./temp/rejected")
