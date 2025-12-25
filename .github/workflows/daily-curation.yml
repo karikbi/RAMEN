@@ -75,7 +75,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
       
       # =========================================================================
       # PYTHON SETUP WITH CACHING
@@ -360,7 +359,7 @@ jobs:
           git push origin main
           echo "✅ Manifest updates committed and pushed."
         env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       # =========================================================================
       # UPLOAD ARTIFACTS FOR DEBUGGING
