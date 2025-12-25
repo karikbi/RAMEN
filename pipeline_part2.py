@@ -178,8 +178,17 @@ class FilteringPipeline:
         
         self.stats.passed_hard_filters += 1
         
-        # Step 2: Quality Scoring
-        quality_scores = self.quality_scorer.calculate_quality_score(candidate.filepath)
+        # Step 2: SigLIP Quality Score (LIGHTWEIGHT - before heavy embedding extraction)
+        # SigLIP determines quality AND provides embedding for manifest enrichment
+        siglip_embedding, ml_quality_score = self.embedding_extractor.calculate_siglip_quality_score(
+            candidate.filepath
+        )
+        
+        # Step 3: Quality Check (BEFORE expensive embeddings)
+        quality_scores = QualityScores()
+        quality_scores.final_score = ml_quality_score
+        
+        logger.debug(f"{candidate.id}: ML Quality Score = {ml_quality_score:.3f}")
         
         if quality_scores.final_score < self.quality_config.quality_threshold:
             self.stats.rejected_quality_score += 1
@@ -187,17 +196,21 @@ class FilteringPipeline:
                 candidate.filepath,
                 f"Quality score {quality_scores.final_score:.3f} < {self.quality_config.quality_threshold}"
             )
-            logger.debug(
-                f"Rejected {candidate.id}: quality {quality_scores.final_score:.3f}"
-            )
+            logger.debug(f"Rejected {candidate.id}: quality {quality_scores.final_score:.3f}")
             return None
         
         self.stats.passed_quality_scoring += 1
         
-        # Step 3: Extract Embeddings
-        embeddings = self.embedding_extractor.extract_all_embeddings(candidate.filepath)
+        # Step 4: Extract Remaining Embeddings (ONLY FOR APPROVED IMAGES)
+        # This saves compute - MobileNet, EfficientNet, DINOv2 only run on approved images
+        logger.debug(f"Extracting remaining embeddings for approved image {candidate.id}")
+        embeddings = EmbeddingSet()
+        embeddings.siglip = siglip_embedding
+        embeddings.mobilenet_v3 = self.embedding_extractor.extract_mobilenet(candidate.filepath)
+        embeddings.efficientnet_v2 = self.embedding_extractor.extract_efficientnet(candidate.filepath)
+        embeddings.dinov2 = self.embedding_extractor.extract_dinov2(candidate.filepath)
         
-        # Step 4: Generate Metadata
+        # Step 5: Generate Metadata
         metadata = self.metadata_generator.generate_metadata(
             filepath=candidate.filepath,
             title=candidate.title,
@@ -207,7 +220,7 @@ class FilteringPipeline:
             quality_score=quality_scores.final_score
         )
         
-        # Step 5: Move to approved directory
+        # Step 6: Move to approved directory
         approved_path = self.config.approved_dir / candidate.filepath.name
         try:
             shutil.copy2(str(candidate.filepath), str(approved_path))
@@ -234,7 +247,9 @@ class FilteringPipeline:
             metadata=metadata,
             phash=filter_result.phash
         )
+
     
+
     def process_all(
         self,
         candidates: list[CandidateWallpaper],

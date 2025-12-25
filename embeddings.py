@@ -259,9 +259,89 @@ class EmbeddingExtractor:
             logger.error(f"SigLIP extraction failed: {e}")
             return None
     
+    def calculate_siglip_quality_score(self, filepath) -> tuple[Optional[np.ndarray], float]:
+        """
+        Extract SigLIP embedding AND calculate quality score using text similarity.
+        
+        Uses SigLIP's text-image alignment to score images against quality prompts.
+        Returns both the embedding (for storage) and a quality score (0-1).
+        """
+        model, processor = self._load_siglip()
+        if model is None or processor is None:
+            return None, 0.0
+        
+        try:
+            import torch
+            import torch.nn.functional as F
+            
+            img = self._load_image(filepath, (384, 384))
+            
+            # Quality-related text prompts
+            positive_prompts = [
+                "a beautiful high quality wallpaper",
+                "stunning professional photography",
+                "high resolution sharp detailed image",
+                "aesthetic pleasing visual composition",
+            ]
+            
+            negative_prompts = [
+                "blurry low quality image",
+                "ugly poorly composed photo",
+                "noisy grainy low resolution",
+                "watermark text overlay meme",
+            ]
+            
+            # Process image
+            image_inputs = processor(images=img, return_tensors="pt")
+            
+            # Process text prompts
+            text_inputs = processor(
+                text=positive_prompts + negative_prompts, 
+                padding=True, 
+                return_tensors="pt"
+            )
+            
+            if self.device == "cuda":
+                image_inputs = {k: v.cuda() for k, v in image_inputs.items()}
+                text_inputs = {k: v.cuda() for k, v in text_inputs.items()}
+            elif self.device == "mps":
+                image_inputs = {k: v.to("mps") for k, v in image_inputs.items()}
+                text_inputs = {k: v.to("mps") for k, v in text_inputs.items()}
+            
+            with torch.no_grad():
+                image_features = model.get_image_features(**image_inputs)
+                text_features = model.get_text_features(**text_inputs)
+                
+                # Normalize
+                image_features = F.normalize(image_features, dim=-1)
+                text_features = F.normalize(text_features, dim=-1)
+                
+                # Compute similarities
+                similarities = torch.matmul(image_features, text_features.T)[0]
+                
+                n_positive = len(positive_prompts)
+                positive_scores = similarities[:n_positive]
+                negative_scores = similarities[n_positive:]
+                
+                # Quality score: positive - negative alignment
+                pos_mean = torch.sigmoid(positive_scores).mean().item()
+                neg_mean = torch.sigmoid(negative_scores).mean().item()
+                
+                quality_score = (pos_mean - neg_mean + 1) / 2
+                quality_score = max(0.0, min(1.0, quality_score))
+                
+                embedding = image_features.cpu().numpy()[0].astype(np.float16)
+            
+            return embedding, quality_score
+            
+        except Exception as e:
+            logger.error(f"SigLIP quality scoring failed: {e}")
+            return None, 0.0
+    
     # =========================================================================
     # DINOV2 (1024-dim)
     # =========================================================================
+
     
     def _load_dinov2(self):
         """Load DINOv2 model from torch hub."""
