@@ -11,8 +11,12 @@ Configure these in your GitHub repository:
 
 ### Reddit API Credentials
  
-**No credentials required.** The pipeline uses public public JSON feeds.
- 
+| Secret | Description | How to Get |
+|--------|-------------|------------|
+| `REDDIT_USER_AGENT` | Descriptive User-Agent string | Use: `python:RAMEN-Wallpaper-Curator:v1.0.0 (by /u/wallpaper_curator)` |
+
+**Note:** Reddit no longer requires OAuth credentials. The pipeline uses public JSON feeds.
+
 ---
 
 ### Stock Photo APIs
@@ -55,9 +59,9 @@ Configure these in your GitHub repository:
 
 After adding all secrets, verify your setup:
 
-- [ ] All 10 secrets are configured
+- [ ] All 8 secrets are configured
 - [ ] No trailing whitespace in secret values
-- [ ] Reddit app is approved and active
+- [ ] `REDDIT_USER_AGENT` follows the format: `python:AppName:Version (by /u/username)`
 - [ ] Unsplash/Pexels API keys are valid
 - [ ] R2 bucket exists and is accessible
 - [ ] PAT has correct scopes
@@ -77,14 +81,14 @@ Check the logs for any authentication or configuration errors.
 
 ## Troubleshooting
 
-### "Reddit API credentials missing"
-- Verify `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` are set
-- Ensure the Reddit app is a "script" type application
-- Check the app status in Reddit preferences
+### "Reddit API 403 Forbidden"
+- Verify `REDDIT_USER_AGENT` is set and follows Reddit's format guidelines
+- Format: `platform:app_name:version (by /u/reddit_username)`
+- Avoid generic User-Agents like "bot" or "script"
 
 ### "Unsplash/Pexels rate limit exceeded"
 - These APIs have daily/monthly limits
-- Consider reducing fetch counts in `curate_wallpapers.py`
+- Consider reducing fetch counts in `config.yaml`
 
 ### "R2 upload failed"
 - Verify endpoint URL format
@@ -94,3 +98,4 @@ Check the logs for any authentication or configuration errors.
 ### "Push to main failed"
 - Verify `PERSONAL_GITHUB_TOKEN` has `repo` scope
 - Check if branch protection rules require different auth
+

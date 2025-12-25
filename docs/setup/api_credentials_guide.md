@@ -51,8 +51,6 @@ If you are setting up R2 storage:
     *   **Secret Access Key**: Save as `R2_SECRET_KEY`.
     *   **Endpoint**: Copy the URL for your bucket (usually `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`). Save as `R2_ENDPOINT`.
 
----
-
 ## 5. Adding Secrets to GitHub
 
 Since you cannot use the CLI, use the browser:
@@ -63,13 +61,12 @@ Since you cannot use the CLI, use the browser:
 4.  **Actions**: Click on **Actions** (under Secrets and variables).
 5.  **Add Secret**: Click the green **New repository secret** button.
 6.  **Enter Data**:
-    *   **Name**: Paste the name (e.g., `REDDIT_CLIENT_ID`).
+    *   **Name**: Paste the name (e.g., `UNSPLASH_ACCESS_KEY`).
     *   **Secret**: Paste the value you copied earlier.
     *   Click **Add secret**.
 7.  **Repeat**: Repeat step 6 for all the keys you collected:
-    *   `REDDIT_CLIENT_ID`
-    *   `REDDIT_CLIENT_SECRET`
-    *   `REDDIT_USER_AGENT`
+    *   `REDDIT_USER_AGENT` (use: `python:RAMEN-Wallpaper-Curator:v1.0.0 (by /u/wallpaper_curator)`)
     *   `UNSPLASH_ACCESS_KEY`
     *   `PEXELS_API_KEY`
-    *   (And R2 secrets if you have them)
+    *   (And R2 secrets if you have them: `R2_ACCESS_KEY`, `R2_SECRET_KEY`, `R2_ENDPOINT`, `R2_BUCKET_NAME`)
+

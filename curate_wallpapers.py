@@ -40,7 +40,11 @@ class Config:
     
     # API Credentials (loaded from environment)
     # Reddit no longer requires keys for this public JSON method
-    reddit_user_agent: str = field(default_factory=lambda: os.getenv("REDDIT_USER_AGENT", "RAMEN-Pipeline/1.0"))
+    # User-Agent must be descriptive per Reddit's guidelines
+    reddit_user_agent: str = field(default_factory=lambda: os.getenv(
+        "REDDIT_USER_AGENT", 
+        "python:RAMEN-Wallpaper-Curator:v1.0.0 (by /u/wallpaper_curator)"
+    ))
     unsplash_access_key: str = field(default_factory=lambda: os.getenv("UNSPLASH_ACCESS_KEY", ""))
     pexels_api_key: str = field(default_factory=lambda: os.getenv("PEXELS_API_KEY", ""))
     
