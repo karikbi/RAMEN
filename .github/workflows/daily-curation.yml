@@ -77,6 +77,16 @@ jobs:
           fetch-depth: 1
       
       # =========================================================================
+      # CREATE TEMP DIRECTORIES
+      # =========================================================================
+      - name: Create Working Directories
+        run: |
+          mkdir -p ./temp/candidates
+          mkdir -p ./temp/approved
+          mkdir -p ./logs
+          mkdir -p ./reports
+      
+      # =========================================================================
       # PYTHON SETUP WITH CACHING
       # =========================================================================
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -97,7 +107,7 @@ jobs:
             libtesseract-dev \
             libopencv-dev \
             python3-opencv \
-            libgl1-mesa-glx \
+            libgl1 \
             libglib2.0-0 \
             libsm6 \
             libxext6 \
@@ -198,15 +208,6 @@ jobs:
           
           echo "✅ rclone configured for Cloudflare R2"
       
-      # =========================================================================
-      # CREATE TEMP DIRECTORIES
-      # =========================================================================
-      - name: Create Working Directories
-        run: |
-          mkdir -p ./temp/candidates
-          mkdir -p ./temp/approved
-          mkdir -p ./logs
-          mkdir -p ./reports
 
       # =========================================================================
       # RUN MAIN CURATION PIPELINE
