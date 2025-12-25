@@ -811,6 +811,7 @@ class R2ManifestManager:
             
             # Save to local cache
             cache_path = self.local_cache_dir / key
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
             if key.endswith(".gz"):
                 with open(cache_path, "wb") as f:
                     f.write(data)

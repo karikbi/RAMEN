@@ -97,6 +97,7 @@ class WallpaperCurationPipeline:
         skip_part1: bool = False,
         dry_run: bool = False,
         max_runtime_minutes: int = 50,
+        fresh_start: bool = False,
     ):
         """
         Initialize the pipeline.
@@ -108,12 +109,18 @@ class WallpaperCurationPipeline:
             skip_part1: Skip fetching, use existing candidates.
             dry_run: Dry-run mode - no side effects.
             max_runtime_minutes: Max runtime before graceful exit (for CI).
+            fresh_start: Reset deduplication system for clean curation.
         """
         self.config = config or Config()
         self.quality_threshold = quality_threshold
         self.skip_upload = skip_upload
         self.skip_part1 = skip_part1
         self.dry_run_enabled = dry_run
+        self.fresh_start = fresh_start
+        
+        # If fresh start, clear local dedup/state files before initialization
+        if fresh_start:
+            self._clear_dedup_state()
         
         # Statistics
         self.stats = PipelineStats()
@@ -147,6 +154,42 @@ class WallpaperCurationPipeline:
         
         # Structured logging
         self.stage_loggers = setup_structured_logging()
+    
+    def _clear_dedup_state(self) -> None:
+        """
+        Clear all local deduplication state for fresh curation.
+        
+        Removes:
+        - Dedup cache directory
+        - Existing hashes file
+        - Pipeline state directory
+        - Manifest cache
+        """
+        import shutil
+        
+        paths_to_clear = [
+            Path("./dedup_cache"),
+            Path("./existing_hashes.json"),
+            Path("./pipeline_state"),
+            Path("./manifest_cache"),
+            Path("./source_stats.json"),
+        ]
+        
+        logger.info("🧹 Clearing deduplication state for fresh start...")
+        
+        for path in paths_to_clear:
+            try:
+                if path.exists():
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                        logger.info(f"  ✓ Removed directory: {path}")
+                    else:
+                        path.unlink()
+                        logger.info(f"  ✓ Removed file: {path}")
+            except Exception as e:
+                logger.warning(f"  ⚠ Failed to remove {path}: {e}")
+        
+        logger.info("🔄 Fresh start ready - deduplication system reset")
     
     async def run_part1_fetching(self) -> list[CandidateWallpaper]:
         """Run Part 1: Fetch candidates from all sources."""
@@ -631,6 +674,11 @@ class WallpaperCurationPipeline:
             import json
             with open(manifest_path) as f:
                 manifest = json.load(f)
+            # Handle both list format and wrapped format {"wallpapers": [...]}
+            if isinstance(manifest, list):
+                manifest = {"wallpapers": manifest}
+            elif isinstance(manifest, dict) and "wallpapers" not in manifest:
+                manifest = {"wallpapers": []}
             valid, errors = self.data_validator.check_duplicate_ids(manifest)
             if not valid:
                 logger.error(f"Duplicate ID check failed: {errors}")
@@ -678,6 +726,7 @@ async def main(
     skip_part1: bool = False,
     dry_run: bool = False,
     max_runtime_minutes: int = 50,
+    fresh_start: bool = False,
 ) -> list[ApprovedWallpaper]:
     """
     Run the complete wallpaper curation pipeline.
@@ -688,6 +737,7 @@ async def main(
         skip_part1: Skip fetching, use existing candidates.
         dry_run: Dry-run mode with no side effects.
         max_runtime_minutes: Max runtime before graceful exit.
+        fresh_start: Reset deduplication system for clean curation.
     
     Returns:
         List of approved wallpapers.
@@ -698,6 +748,7 @@ async def main(
         skip_part1=skip_part1,
         dry_run=dry_run,
         max_runtime_minutes=max_runtime_minutes,
+        fresh_start=fresh_start,
     )
     
     return await pipeline.run()
@@ -746,6 +797,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Force run even if another instance appears to be running"
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Fresh start - reset deduplication system and start clean (ignores previous runs)"
+    )
     
     args = parser.parse_args()
     
@@ -763,12 +819,17 @@ if __name__ == "__main__":
             lock_file.unlink()
             logger.info("🔓 Removed stale lock file (--force)")
     
+    # Log fresh start mode
+    if args.fresh:
+        logger.info("🔄 Fresh start mode enabled - resetting deduplication system")
+    
     approved = asyncio.run(main(
         quality_threshold=args.quality_threshold,
         skip_upload=args.skip_upload,
         skip_part1=args.skip_fetch,
         dry_run=args.dry_run,
         max_runtime_minutes=args.max_runtime,
+        fresh_start=args.fresh,
     ))
     
     if approved:

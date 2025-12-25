@@ -31,30 +31,33 @@ sources:
     enabled: true
     subreddits:
       - name: wallpapers
-        fetch_count: 50
-        min_upvotes: 5000
+        fetch_count: 100  # High volume
+        min_upvotes: 1000  # Lowered from 5000
       - name: EarthPorn
-        fetch_count: 30
-        min_upvotes: 10000
+        fetch_count: 80   # Nature
+        min_upvotes: 2000  # Lowered from 10000
       - name: Amoledbackgrounds
-        fetch_count: 30
-        min_upvotes: 3000
+        fetch_count: 60   # Mobile-friendly
+        min_upvotes: 300   # Lowered from 3000
       - name: spaceporn
-        fetch_count: 20
-        min_upvotes: 5000
+        fetch_count: 50   # Space
+        min_upvotes: 1000  # Lowered from 5000
       - name: CityPorn
-        fetch_count: 20
-        min_upvotes: 5000
+        fetch_count: 50   # Urban
+        min_upvotes: 1000  # Lowered from 5000
       - name: SkyPorn
-        fetch_count: 15
-        min_upvotes: 3000
+        fetch_count: 40   # Sky
+        min_upvotes: 500   # Lowered from 3000
+      - name: MinimalWallpaper
+        fetch_count: 40   # Minimal
+        min_upvotes: 200
       - name: ImaginaryLandscapes
-        fetch_count: 15
-        min_upvotes: 3000
+        fetch_count: 40   # Art
+        min_upvotes: 500   # Lowered from 3000
   
   unsplash:
     enabled: true
-    count: 30
+    count: 100  # Increased from 30 for more wallpapers
     collections:
       - curated
       - nature
@@ -62,19 +65,19 @@ sources:
   
   pexels:
     enabled: true
-    count: 20
+    count: 80  # Increased from 20 for more wallpapers
 
 # -----------------------------------------------------------------------------
 # Hard Filter Configuration
 # -----------------------------------------------------------------------------
 filters:
-  # Minimum resolution (2560x1440 = 2K)
-  min_width: 2560
-  min_height: 1440
+  # Minimum resolution (1920x1080 = Full HD) - lowered from 2K for more approvals
+  min_width: 1920
+  min_height: 1080
   
-  # File size limits
-  min_file_size_kb: 200
-  max_file_size_mb: 15
+  # File size limits - relaxed
+  min_file_size_kb: 100  # Lowered from 200KB
+  max_file_size_mb: 20   # Increased from 15MB
   
   # Aspect ratio - no restrictions, quality scoring determines suitability
   # Accepts portrait (0.5), square (1.0), landscape (1.5-2.0), ultra-wide (2.0+)

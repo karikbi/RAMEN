@@ -51,7 +51,7 @@ class QualityConfig:
     composition_weight: float = 0.30
     aesthetic_weight: float = 0.20
     suitability_weight: float = 0.10
-    quality_threshold: float = 0.85
+    quality_threshold: float = 0.70  # Lowered from 0.85 for more approvals
 
 
 class QualityScorer:

@@ -55,20 +55,23 @@ class Config:
     r2_bucket_name: str = field(default_factory=lambda: os.getenv("R2_BUCKET_NAME", ""))
     
     # Quality thresholds
-    quality_threshold: float = 0.85
+    quality_threshold: float = 0.70  # Lowered from 0.85
     
-    # Subreddit configurations
+    # Subreddit configurations - increased counts, lowered upvote requirements
     subreddits: list[SubredditConfig] = field(default_factory=lambda: [
-        SubredditConfig("wallpapers", 50, 5000),
-        SubredditConfig("EarthPorn", 30, 10000),
-        SubredditConfig("Amoledbackgrounds", 25, 1000),
-        SubredditConfig("MinimalWallpaper", 20, 500),
-        SubredditConfig("CityPorn", 20, 2000),
+        SubredditConfig("wallpapers", 100, 1000),     # High volume
+        SubredditConfig("EarthPorn", 80, 2000),       # Nature
+        SubredditConfig("Amoledbackgrounds", 60, 300), # Mobile-friendly
+        SubredditConfig("spaceporn", 50, 1000),       # Space
+        SubredditConfig("CityPorn", 50, 1000),        # Urban
+        SubredditConfig("SkyPorn", 40, 500),          # Sky
+        SubredditConfig("MinimalWallpaper", 40, 200), # Minimal
+        SubredditConfig("ImaginaryLandscapes", 40, 500), # Art
     ])
     
-    # Candidate counts per source
-    unsplash_count: int = 30
-    pexels_count: int = 20
+    # Candidate counts per source - increased for more wallpapers
+    unsplash_count: int = 100  # Increased from 30
+    pexels_count: int = 80     # Increased from 20
     
     # Directories
     temp_dir: Path = field(default_factory=lambda: Path("./temp"))

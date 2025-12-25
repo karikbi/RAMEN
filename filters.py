@@ -41,10 +41,10 @@ class FilterResult:
 @dataclass  
 class FilterConfig:
     """Configuration for hard filters."""
-    min_width: int = 2560
-    min_height: int = 1440
-    min_file_size: int = 200 * 1024  # 200KB
-    max_file_size: int = 15 * 1024 * 1024  # 15MB
+    min_width: int = 1920  # Lowered from 2560 for more approvals
+    min_height: int = 1080  # Lowered from 1440 for more approvals
+    min_file_size: int = 100 * 1024  # 100KB (lowered from 200KB)
+    max_file_size: int = 20 * 1024 * 1024  # 20MB (increased from 15MB)
     min_aspect_ratio: float = 0.5  # Portrait minimum (e.g., 9:16)
     max_aspect_ratio: float = 3.0  # Ultra-wide maximum (e.g., 21:9)
     max_text_coverage: float = 0.50  # 50% (relaxed from 30% to reduce false positives)
@@ -77,6 +77,7 @@ class HardFilters:
         self.existing_hashes.update(new_hashes)
         hash_file = Path("./existing_hashes.json")
         try:
+            hash_file.parent.mkdir(parents=True, exist_ok=True)
             with open(hash_file, "w") as f:
                 json.dump(self.existing_hashes, f)
         except Exception as e:
@@ -129,8 +130,13 @@ class HardFilters:
             return False, aspect, f"Aspect ratio too wide: {aspect:.2f}"
         return True, aspect, ""
     
-    def check_text_coverage(self, img: Image.Image) -> Tuple[bool, float, str]:
-        """Detect text using OCR and calculate coverage."""
+    def check_text_coverage(self, img: Image.Image, source: str = "") -> Tuple[bool, float, str]:
+        """Detect text using OCR and calculate coverage.
+        
+        Args:
+            img: PIL Image to check
+            source: Source identifier (e.g., 'reddit', 'unsplash') for source-specific handling
+        """
         if not TESSERACT_AVAILABLE:
             return True, 0.0, ""  # Skip if tesseract not available
         
@@ -151,20 +157,40 @@ class HardFilters:
             # Run OCR
             data = pytesseract.image_to_data(img_resized, output_type=pytesseract.Output.DICT)
             
-            # Calculate text coverage
+            # Calculate text coverage - with stricter filtering to reduce false positives
             total_pixels = img_resized.width * img_resized.height
             text_pixels = 0
+            detected_words = []
             
             for i, conf in enumerate(data["conf"]):
-                if int(conf) > 60:  # Confidence threshold (raised from 30 to reduce false positives)
-                    w = data["width"][i]
-                    h = data["height"][i]
-                    text_pixels += w * h
+                try:
+                    confidence = int(conf)
+                except (ValueError, TypeError):
+                    continue
+                    
+                text = data["text"][i].strip() if data["text"][i] else ""
+                
+                # Strict filtering to reduce false positives:
+                # 1. High confidence (80+)
+                # 2. Minimum 3 characters
+                # 3. Contains mostly letters/numbers (actual words, not noise)
+                if confidence > 80 and len(text) >= 3:
+                    # Check if it's actual text (at least 50% alphanumeric)
+                    alnum_chars = sum(1 for c in text if c.isalnum())
+                    if alnum_chars / len(text) >= 0.5:
+                        w = data["width"][i]
+                        h = data["height"][i]
+                        text_pixels += w * h
+                        detected_words.append(text)
             
             coverage = text_pixels / total_pixels
             
+            # Log detected words for debugging
+            if detected_words:
+                logger.debug(f"OCR detected words: {detected_words[:10]}...")
+            
             if coverage > self.config.max_text_coverage:
-                return False, coverage, f"Too much text: {coverage*100:.1f}%"
+                return False, coverage, f"Too much text: {coverage*100:.1f}% ({len(detected_words)} words)"
             return True, coverage, ""
         except Exception as e:
             logger.debug(f"OCR check failed: {e}")
@@ -198,8 +224,27 @@ class HardFilters:
         except Exception as e:
             logger.error(f"Failed to move rejected file: {e}")
     
-    def apply_all_filters(self, filepath: Path, candidate_id: str) -> FilterResult:
-        """Apply all hard filters to a candidate."""
+    def apply_all_filters(self, filepath: Path, candidate_id: str, source: str = "") -> FilterResult:
+        """Apply all hard filters to a candidate.
+        
+        Args:
+            filepath: Path to image file
+            candidate_id: Unique ID for the candidate
+            source: Source identifier (e.g., 'reddit', 'unsplash') for source-specific handling
+        """
+        # Pre-processing: Crop Reddit watermarks FIRST
+        if source.lower() == "reddit":
+            try:
+                from watermark_cropper import WatermarkCropper
+                cropper = WatermarkCropper()
+                was_cropped, _ = cropper.process_image(filepath, source)
+                if was_cropped:
+                    logger.info(f"Cropped watermark from Reddit image: {filepath.name}")
+            except ImportError:
+                logger.debug("Watermark cropper not available")
+            except Exception as e:
+                logger.debug(f"Watermark cropping failed: {e}")
+        
         # File size check
         size_ok, file_size, reason = self.check_file_size(filepath)
         if not size_ok:
@@ -223,7 +268,7 @@ class HardFilters:
             return FilterResult(passed=False, reason=reason, width=width, height=height, aspect_ratio=aspect)
         
         # Text detection
-        text_ok, text_coverage, reason = self.check_text_coverage(img)
+        text_ok, text_coverage, reason = self.check_text_coverage(img, source)
         if not text_ok:
             return FilterResult(passed=False, reason=reason, width=width, height=height, aspect_ratio=aspect)
         

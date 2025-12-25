@@ -120,14 +120,30 @@ class CollectionValidator:
         gz_path = manifest_path.with_suffix(".json.gz")
         if gz_path.exists():
             with gzip.open(gz_path, "rt", encoding="utf-8") as f:
-                self.collection = json.load(f)
+                data = json.load(f)
+                # Handle both list format and wrapped format {"wallpapers": [...]}
+                if isinstance(data, list):
+                    self.collection = data
+                elif isinstance(data, dict):
+                    self.collection = data.get("wallpapers", [])
+                else:
+                    logger.error(f"Unexpected manifest format: {type(data)}")
+                    return False
             logger.info(f"Loaded {len(self.collection)} wallpapers from {gz_path}")
             return True
         
         # Try uncompressed
         if manifest_path.exists():
             with open(manifest_path) as f:
-                self.collection = json.load(f)
+                data = json.load(f)
+                # Handle both list format and wrapped format {"wallpapers": [...]}
+                if isinstance(data, list):
+                    self.collection = data
+                elif isinstance(data, dict):
+                    self.collection = data.get("wallpapers", [])
+                else:
+                    logger.error(f"Unexpected manifest format: {type(data)}")
+                    return False
             logger.info(f"Loaded {len(self.collection)} wallpapers from {manifest_path}")
             return True
         

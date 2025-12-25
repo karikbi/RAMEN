@@ -160,10 +160,11 @@ class FilteringPipeline:
             logger.warning(f"Candidate {candidate.id} has no valid filepath")
             return None
         
-        # Step 1: Hard Filters
+        # Step 1: Hard Filters (includes watermark cropping for Reddit)
         filter_result = self.hard_filters.apply_all_filters(
             candidate.filepath,
-            candidate.id
+            candidate.id,
+            source=candidate.source  # Pass source for watermark detection
         )
         
         if not filter_result.passed:

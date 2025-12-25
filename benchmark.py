@@ -230,7 +230,7 @@ class PipelineBenchmark:
         def run_filters():
             results = []
             for i, path in enumerate(image_paths):
-                result = filters.apply_all_filters(path, f"test_{i}")
+                result = filters.apply_all_filters(path, f"test_{i}", source="benchmark")
                 results.append(result)
             return results
         
