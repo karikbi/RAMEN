@@ -47,7 +47,7 @@ class FilterConfig:
     max_file_size: int = 15 * 1024 * 1024  # 15MB
     min_aspect_ratio: float = 0.5  # Portrait minimum (e.g., 9:16)
     max_aspect_ratio: float = 3.0  # Ultra-wide maximum (e.g., 21:9)
-    max_text_coverage: float = 0.30  # 30%
+    max_text_coverage: float = 0.50  # 50% (relaxed from 30% to reduce false positives)
     hash_similarity_threshold: int = 10  # Hamming distance (lower = more similar)
     rejected_dir: Path = Path("./temp/rejected")
 
@@ -156,7 +156,7 @@ class HardFilters:
             text_pixels = 0
             
             for i, conf in enumerate(data["conf"]):
-                if int(conf) > 30:  # Confidence threshold
+                if int(conf) > 60:  # Confidence threshold (raised from 30 to reduce false positives)
                     w = data["width"][i]
                     h = data["height"][i]
                     text_pixels += w * h

@@ -13,7 +13,8 @@
 # -----------------------------------------------------------------------------
 quality:
   # Minimum score to approve a wallpaper (0.0-1.0)
-  threshold: 0.85
+  # Lowered from 0.85 to 0.70 for initial curation - adjust as scoring improves
+  threshold: 0.70
   
   # Component weights (must sum to 1.0)
   weights:
@@ -81,7 +82,8 @@ filters:
   max_aspect_ratio: 3.0   # Ultra-wide maximum
   
   # Text detection threshold (max allowed text coverage)
-  max_text_coverage: 0.30
+  # Relaxed from 0.30 to 0.50 to reduce false positives
+  max_text_coverage: 0.50
   
   # Perceptual hash similarity threshold (lower = stricter)
   phash_threshold: 10

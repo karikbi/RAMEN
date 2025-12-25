@@ -245,21 +245,63 @@ def get_file_extension(url: str, content_type: Optional[str] = None) -> str:
     
     return ".jpg"  # Default
 
-
 # =============================================================================
 # REDDIT API FETCHING
 # =============================================================================
 
 class RedditFetcher:
-    """Fetches wallpaper candidates from Reddit using public JSON feeds (No API Auth)."""
+    """Fetches wallpaper candidates from Reddit using OAuth API.
     
-    BASE_URL = "https://www.reddit.com"
+    Reddit requires OAuth authentication for API access. This uses the
+    'application only' OAuth flow which doesn't require user interaction.
+    
+    Required environment variables:
+        - REDDIT_CLIENT_ID: Reddit app client ID
+        - REDDIT_CLIENT_SECRET: Reddit app client secret
+    
+    Create an app at: https://www.reddit.com/prefs/apps
+    """
+    
+    AUTH_URL = "https://www.reddit.com/api/v1/access_token"
+    API_URL = "https://oauth.reddit.com"
     
     def __init__(self, config: Config):
         self.config = config
-        self.headers = {
-            "User-Agent": config.reddit_user_agent
-        }
+        self.client_id = os.getenv("REDDIT_CLIENT_ID", "")
+        self.client_secret = os.getenv("REDDIT_CLIENT_SECRET", "")
+        self.access_token: Optional[str] = None
+        self.user_agent = config.reddit_user_agent
+    
+    async def _get_access_token(self, session: aiohttp.ClientSession) -> Optional[str]:
+        """Get OAuth access token using application-only flow."""
+        if not self.client_id or not self.client_secret:
+            logger.warning("Reddit credentials not set (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET)")
+            return None
+        
+        auth = aiohttp.BasicAuth(self.client_id, self.client_secret)
+        headers = {"User-Agent": self.user_agent}
+        data = {"grant_type": "client_credentials"}
+        
+        try:
+            async with session.post(
+                self.AUTH_URL, 
+                auth=auth, 
+                headers=headers, 
+                data=data
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Reddit OAuth failed: {response.status} - {error_text}")
+                    return None
+                
+                result = await response.json()
+                token = result.get("access_token")
+                if token:
+                    logger.info("Successfully obtained Reddit OAuth token")
+                return token
+        except Exception as e:
+            logger.error(f"Reddit OAuth request failed: {e}")
+            return None
     
     def _extract_image_url(self, post_data: Dict[str, Any]) -> Optional[str]:
         """
@@ -314,15 +356,28 @@ class RedditFetcher:
     
     async def fetch_subreddit(self, session: aiohttp.ClientSession, subreddit_config: SubredditConfig) -> list[dict[str, Any]]:
         """
-        Fetch top posts from a subreddit using .json endpoint.
+        Fetch top posts from a subreddit using OAuth API.
         """
         posts = []
-        url = f"{self.BASE_URL}/r/{subreddit_config.name}/top.json"
+        
+        # Get OAuth token if not already available
+        if not self.access_token:
+            self.access_token = await self._get_access_token(session)
+            if not self.access_token:
+                logger.warning(f"Skipping r/{subreddit_config.name} - no OAuth token")
+                return []
+        
+        url = f"{self.API_URL}/r/{subreddit_config.name}/top"
         
         # Fetch slightly more than needed to account for filtering
         params = {
             "t": "month",
             "limit": min(100, subreddit_config.fetch_count * 2) 
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "User-Agent": self.user_agent
         }
         
         logger.info(
@@ -331,16 +386,30 @@ class RedditFetcher:
         )
         
         try:
-            async with session.get(url, headers=self.headers, params=params) as response:
-                if response.status == 429:
+            async with session.get(url, headers=headers, params=params) as response:
+                if response.status == 401:
+                    # Token expired, try to refresh
+                    logger.warning("Reddit OAuth token expired, refreshing...")
+                    self.access_token = await self._get_access_token(session)
+                    if not self.access_token:
+                        return []
+                    # Retry with new token
+                    headers["Authorization"] = f"Bearer {self.access_token}"
+                    async with session.get(url, headers=headers, params=params) as retry_response:
+                        if retry_response.status != 200:
+                            logger.error(f"Reddit error after token refresh: {retry_response.status}")
+                            return []
+                        data = await retry_response.json()
+                elif response.status == 429:
                     logger.warning(f"Rate limited by Reddit on r/{subreddit_config.name}")
                     return []
-                
-                if response.status != 200:
-                    logger.error(f"Reddit error {response.status}: {await response.text()}")
+                elif response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Reddit error {response.status}: {error_text[:500]}")
                     return []
+                else:
+                    data = await response.json()
                 
-                data = await response.json()
                 children = data.get("data", {}).get("children", [])
                 
                 for child in children:
@@ -383,15 +452,107 @@ class RedditFetcher:
         logger.info(f"Fetched {len(posts)} posts from r/{subreddit_config.name}")
         return posts
     
+    async def _fetch_via_rss(self, session: aiohttp.ClientSession, subreddit_config: SubredditConfig) -> list[dict[str, Any]]:
+        """
+        Fallback: Fetch posts using public RSS feed (no auth required).
+        
+        RSS feeds have limitations:
+        - Only top 25 posts per request
+        - No upvote filtering (done client-side)
+        - Less metadata available
+        """
+        posts = []
+        rss_url = f"https://www.reddit.com/r/{subreddit_config.name}/top.rss"
+        params = {"t": "month", "limit": 100}
+        
+        headers = {"User-Agent": self.user_agent}
+        
+        try:
+            async with session.get(rss_url, headers=headers, params=params) as response:
+                if response.status != 200:
+                    logger.warning(f"RSS feed failed for r/{subreddit_config.name}: {response.status}")
+                    return []
+                
+                text = await response.text()
+                
+                # Simple XML parsing for RSS entries
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(text)
+                
+                # Handle Atom namespace
+                ns = {'atom': 'http://www.w3.org/2005/Atom'}
+                entries = root.findall('.//atom:entry', ns)
+                
+                for entry in entries:
+                    try:
+                        title = entry.find('atom:title', ns)
+                        link = entry.find('atom:link', ns)
+                        author = entry.find('atom:author/atom:name', ns)
+                        content = entry.find('atom:content', ns)
+                        entry_id = entry.find('atom:id', ns)
+                        
+                        if content is not None:
+                            content_text = content.text or ""
+                            # Extract image URL from content
+                            img_match = re.search(r'href="(https://[^"]+\.(?:jpg|jpeg|png|webp|gif))"', content_text, re.IGNORECASE)
+                            if not img_match:
+                                img_match = re.search(r'src="(https://[^"]+\.(?:jpg|jpeg|png|webp|gif))"', content_text, re.IGNORECASE)
+                            if not img_match:
+                                # Try i.redd.it links
+                                img_match = re.search(r'href="(https://i\.redd\.it/[^"]+)"', content_text)
+                            
+                            if img_match:
+                                image_url = img_match.group(1)
+                                post_id = entry_id.text.split('/')[-1] if entry_id is not None else str(len(posts))
+                                
+                                posts.append({
+                                    "id": post_id,
+                                    "title": title.text if title is not None else "Untitled",
+                                    "subreddit": subreddit_config.name,
+                                    "upvotes": 0,  # Not available in RSS
+                                    "author": author.text.replace("/u/", "") if author is not None else "[unknown]",
+                                    "post_url": link.get('href') if link is not None else "",
+                                    "image_url": image_url,
+                                    "created_utc": None,
+                                })
+                                
+                                if len(posts) >= subreddit_config.fetch_count:
+                                    break
+                    except Exception as e:
+                        logger.debug(f"Failed to parse RSS entry: {e}")
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"RSS fetch error for r/{subreddit_config.name}: {e}")
+        
+        logger.info(f"Fetched {len(posts)} posts from r/{subreddit_config.name} via RSS")
+        return posts
+    
     async def fetch_all(self, session: aiohttp.ClientSession) -> list[dict[str, Any]]:
-        """Fetch from all configured subreddits."""
+        """Fetch from all configured subreddits. Uses OAuth if available, RSS as fallback."""
         all_posts = []
+        use_rss = False
+        
+        # Check if we have OAuth credentials
+        if not self.client_id or not self.client_secret:
+            logger.warning("No Reddit OAuth credentials - using RSS feeds (no upvote filtering)")
+            use_rss = True
+        
         for subreddit_config in self.config.subreddits:
-            # We pass session now since we are async
-            posts = await self.fetch_subreddit(session, subreddit_config)
+            if use_rss:
+                posts = await self._fetch_via_rss(session, subreddit_config)
+            else:
+                posts = await self.fetch_subreddit(session, subreddit_config)
+                # If OAuth fails, switch to RSS for remaining subreddits
+                if len(posts) == 0 and not self.access_token:
+                    logger.warning("OAuth failed - switching to RSS feeds for remaining subreddits")
+                    use_rss = True
+                    posts = await self._fetch_via_rss(session, subreddit_config)
+            
             all_posts.extend(posts)
             # Be nice to Reddit's servers
             await asyncio.sleep(self.config.request_delay)
+        
         return all_posts
 
 
@@ -425,8 +586,8 @@ class UnsplashFetcher:
         
         # Fetch from curated photos endpoint (editorial picks)
         try:
-            # First, get some featured collections
-            collections_url = f"{self.BASE_URL}/collections/featured"
+            # Get collections (the /collections/featured endpoint was deprecated in 2021)
+            collections_url = f"{self.BASE_URL}/collections"
             params = {"per_page": 10}
             
             async with session.get(collections_url, headers=self.headers, params=params) as response:

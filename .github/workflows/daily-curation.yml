@@ -25,7 +25,7 @@ on:
       quality_threshold:
         description: 'Quality threshold (0.0-1.0)'
         required: false
-        default: '0.85'
+        default: '0.70'
       dry_run:
         description: 'Dry run (no uploads/commits)'
         required: false
@@ -218,7 +218,7 @@ jobs:
           echo "================================================"
           
           # Set quality threshold from input or default
-          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.85' }}"
+          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.70' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
           DEBUG="${{ github.event.inputs.debug || 'false' }}"
           
@@ -277,7 +277,9 @@ jobs:
           
           exit $PIPELINE_EXIT_CODE
         env:
-          # Reddit API
+          # Reddit API (OAuth credentials required)
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
           # Stock Photo APIs
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
