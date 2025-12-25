@@ -170,34 +170,7 @@ jobs:
         if: steps.models-cache.outputs.cache-hit != 'true'
         run: |
           echo "📥 Downloading ML models (not found in cache)..."
-          
-          # Create cache directories to avoid symlink errors
-          mkdir -p ~/.cache/huggingface
-          mkdir -p ~/.cache/torch
-          mkdir -p ./models
-          
-          python -c "
-          import os
-          os.makedirs('./models', exist_ok=True)
-          
-          # Pre-download TensorFlow models
-          print('Loading TensorFlow models...')
-          import tensorflow as tf
-          from tensorflow.keras.applications import MobileNetV3Small, EfficientNetV2L
-          MobileNetV3Small(weights='imagenet', include_top=False, pooling='avg')
-          EfficientNetV2L(weights='imagenet', include_top=False, pooling='avg')
-          
-          # Pre-download PyTorch/HuggingFace models
-          print('Loading PyTorch/HuggingFace models...')
-          from transformers import AutoModel, AutoProcessor
-          AutoProcessor.from_pretrained('google/siglip-large-patch16-256')
-          AutoModel.from_pretrained('google/siglip-large-patch16-256')
-          
-          import torch
-          torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14')
-          
-          print('✅ All models downloaded successfully!')
-          "
+          python download_models.py
         env:
           TF_CPP_MIN_LOG_LEVEL: '2'
           HF_HOME: ~/.cache/huggingface
