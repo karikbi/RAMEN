@@ -26,6 +26,11 @@ on:
         description: 'Quality threshold (0.0-1.0)'
         required: false
         default: '0.70'
+      fresh_start:
+        description: 'Fresh curation (clear dedup state)'
+        required: false
+        type: boolean
+        default: false
       dry_run:
         description: 'Dry run (no uploads/commits)'
         required: false
@@ -219,11 +224,16 @@ jobs:
           
           # Set quality threshold from input or default
           QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.70' }}"
+          FRESH_START="${{ github.event.inputs.fresh_start || 'false' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
           DEBUG="${{ github.event.inputs.debug || 'false' }}"
           
           # Build command with optional flags
           CMD="python pipeline_complete.py --quality-threshold $QUALITY_THRESHOLD --max-runtime 50"
+          
+          if [ "$FRESH_START" = "true" ]; then
+            CMD="$CMD --fresh"
+          fi
           
           if [ "$DRY_RUN" = "true" ]; then
             CMD="$CMD --dry-run"
