@@ -50,15 +50,15 @@ def main():
         # PyTorch/HuggingFace Models
         # =====================================================================
         print("\n2️⃣  Loading PyTorch/HuggingFace models...")
-        print("   - SigLIP (google/siglip-large-patch16-256)")
+        print("   - SigLIP (google/siglip-large-patch16-384)")
         
         from transformers import AutoModel, AutoProcessor
         
-        # Download SigLIP
-        AutoProcessor.from_pretrained('google/siglip-large-patch16-256')
+        # Download SigLIP - Use 384 variant (matches embeddings.py)
+        AutoProcessor.from_pretrained('google/siglip-large-patch16-384')
         print("   ✅ SigLIP processor downloaded")
         
-        AutoModel.from_pretrained('google/siglip-large-patch16-256')
+        AutoModel.from_pretrained('google/siglip-large-patch16-384')
         print("   ✅ SigLIP model downloaded")
         
         # =====================================================================
@@ -68,7 +68,7 @@ def main():
         print("   - DINOv2 ViT-L/14")
         
         import torch
-        torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14')
+        torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14', pretrained=True)
         print("   ✅ DINOv2 downloaded")
         
         # =====================================================================
