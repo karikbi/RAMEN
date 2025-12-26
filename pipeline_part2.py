@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 from tqdm import tqdm
 
 # Import Part 1 types
@@ -101,13 +102,14 @@ class FilteringStats:
 
 class FilteringPipeline:
     """
-    Main filtering pipeline that processes candidates through:
-    1. Hard filters (auto-reject)
-    2. ML-based quality scoring (using SigLIP)
-    3. Embedding extraction (for approved images only)
-    4. Metadata generation
+    Main filtering pipeline that processes candidates through a THREE-PASS approach:
     
-    Supports timeout callback for graceful exit when upload time approaches.
+    1. Hard filters (auto-reject) - ALL candidates
+    2. ML-based quality scoring (SigLIP + LAION) - ALL that passed hard filters
+    3. Embedding extraction (MobileNet, EfficientNet, DINOv2) - APPROVED only
+    
+    This ensures all candidates are scored before any slow embedding extraction,
+    and embeddings are only extracted for approved images.
     """
     
     def __init__(
@@ -115,24 +117,18 @@ class FilteringPipeline:
         config: Config,
         filter_config: Optional[FilterConfig] = None,
         quality_config: Optional[MLQualityConfig] = None,
-        timeout_callback: Optional[callable] = None,
     ):
         """
         Args:
             config: Pipeline configuration.
             filter_config: Hard filter configuration.
             quality_config: ML quality scoring configuration.
-            timeout_callback: Optional callable that returns True when filtering
-                              should stop early to prioritize uploads.
         """
         self.config = config
         self.filter_config = filter_config or FilterConfig()
         self.quality_config = quality_config or MLQualityConfig(
             threshold=config.quality_threshold
         )
-        
-        # Timeout callback for early exit
-        self.timeout_callback = timeout_callback
         
         # Initialize components
         self.hard_filters = HardFilters(self.filter_config)
@@ -148,9 +144,6 @@ class FilteringPipeline:
         
         # Track new hashes for saving
         self.new_hashes: dict[str, str] = {}
-        
-        # Track if we exited early due to timeout
-        self.early_exit = False
 
     
     def _categorize_rejection(self, reason: str) -> None:
@@ -278,10 +271,16 @@ class FilteringPipeline:
         show_progress: bool = True
     ) -> list[ApprovedWallpaper]:
         """
-        Process all candidates through the filtering pipeline using two-pass approach.
+        Process all candidates through the filtering pipeline using THREE-PASS approach.
         
-        Pass 1: Hard filters only (fast, no ML)
-        Pass 2: ML scoring + embedding extraction (on passed candidates only)
+        Pass 1: Hard filters only (fast, no ML) - ALL candidates
+        Pass 2: ML quality scoring only (SigLIP + LAION) - ALL that passed hard filters
+        Pass 3: Embedding extraction (MobileNet, EfficientNet, DINOv2) - APPROVED only
+        
+        This separation ensures:
+        - All candidates are scored before any slow embedding extraction
+        - No timeouts during scoring - pipeline runs to completion
+        - Embeddings only extracted for approved images (saves time)
         
         Args:
             candidates: List of CandidateWallpaper from Part 1.
@@ -300,7 +299,7 @@ class FilteringPipeline:
         # =====================================================================
         passed_candidates: list[tuple[CandidateWallpaper, FilterResult]] = []
         
-        iterator = tqdm(candidates, desc="Hard Filtering") if show_progress else candidates
+        iterator = tqdm(candidates, desc="Pass 1: Hard Filtering") if show_progress else candidates
         
         for candidate in iterator:
             try:
@@ -329,30 +328,26 @@ class FilteringPipeline:
                 logger.error(f"Error in hard filter for {candidate.id}: {e}")
                 continue
         
-        logger.info(f"✅ Hard filter pass complete: {len(passed_candidates)}/{len(candidates)} passed")
+        logger.info(f"✅ Pass 1 complete: {len(passed_candidates)}/{len(candidates)} passed hard filters")
         
         # =====================================================================
-        # PASS 2: ML Quality Scoring + Embeddings (On Passed Candidates Only)
+        # PASS 2: Quality Scoring ONLY (SigLIP + LAION) - No Embedding Extraction
         # =====================================================================
         if not passed_candidates:
             logger.warning("No candidates passed hard filters!")
             self.stats.log_summary()
             return approved
         
-        iterator2 = tqdm(passed_candidates, desc="Quality Scoring") if show_progress else passed_candidates
+        # Store quality-passed candidates with their scores and SigLIP embeddings
+        quality_passed: list[tuple[CandidateWallpaper, FilterResult, 'MLQualityScore', Optional[np.ndarray]]] = []
+        
+        logger.info(f"\n🔍 Pass 2: Quality scoring {len(passed_candidates)} candidates...")
+        iterator2 = tqdm(passed_candidates, desc="Pass 2: Quality Scoring") if show_progress else passed_candidates
         
         for candidate, filter_result in iterator2:
             try:
-                # Check timeout callback
-                if self.timeout_callback and self.timeout_callback():
-                    logger.warning(
-                        f"⏰ Timeout approaching - stopping quality scoring after "
-                        f"{len(approved)} approved"
-                    )
-                    self.early_exit = True
-                    break
-                
                 # ML Quality Scoring with source-aware weights
+                # This returns SigLIP embedding as a byproduct - we'll reuse it later
                 ml_score, siglip_embedding = self.ml_quality_scorer.score_for_source(
                     candidate.filepath,
                     source=candidate.source
@@ -369,10 +364,34 @@ class FilteringPipeline:
                 
                 self.stats.passed_quality_scoring += 1
                 
-                # Extract Remaining Embeddings
-                logger.info(f"Approved {candidate.id} (score={ml_score.final_score:.3f}) - extracting embeddings")
+                # Store for Pass 3 - DON'T extract other embeddings yet
+                quality_passed.append((candidate, filter_result, ml_score, siglip_embedding))
+                logger.info(f"✓ Approved {candidate.id} (score={ml_score.final_score:.3f})")
+                
+            except Exception as e:
+                logger.error(f"Error scoring {candidate.id}: {e}")
+                continue
+        
+        logger.info(f"✅ Pass 2 complete: {len(quality_passed)}/{len(passed_candidates)} passed quality check")
+        
+        if not quality_passed:
+            logger.warning("No candidates passed quality scoring!")
+            self.stats.log_summary()
+            return approved
+        
+        # =====================================================================
+        # PASS 3: Embedding Extraction for APPROVED only (MobileNet, EfficientNet, DINOv2)
+        # =====================================================================
+        logger.info(f"\n🔍 Pass 3: Extracting embeddings for {len(quality_passed)} approved wallpapers...")
+        iterator3 = tqdm(quality_passed, desc="Pass 3: Embeddings") if show_progress else quality_passed
+        
+        for candidate, filter_result, ml_score, siglip_embedding in iterator3:
+            try:
+                # Create embedding set - SigLIP already extracted in Pass 2
                 embeddings = EmbeddingSet()
                 embeddings.siglip = siglip_embedding
+                
+                # Extract remaining 3 embeddings
                 embeddings.mobilenet_v3 = self.embedding_extractor.extract_mobilenet(candidate.filepath)
                 embeddings.efficientnet_v2 = self.embedding_extractor.extract_efficientnet(candidate.filepath)
                 embeddings.dinov2 = self.embedding_extractor.extract_dinov2(candidate.filepath)
@@ -416,8 +435,10 @@ class FilteringPipeline:
                 ))
                 
             except Exception as e:
-                logger.error(f"Error processing {candidate.id}: {e}")
+                logger.error(f"Error extracting embeddings for {candidate.id}: {e}")
                 continue
+        
+        logger.info(f"✅ Pass 3 complete: {len(approved)} wallpapers with full embeddings")
         
         # Save new hashes
         if self.new_hashes:
@@ -425,8 +446,6 @@ class FilteringPipeline:
             logger.info(f"Saved {len(self.new_hashes)} new hashes")
         
         # Log statistics
-        if self.early_exit:
-            logger.info(f"\n⚠️ Early exit - quality scored {self.stats.passed_quality_scoring + self.stats.rejected_quality_score}/{len(passed_candidates)} candidates")
         self.stats.log_summary()
         
         return approved

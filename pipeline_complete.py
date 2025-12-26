@@ -141,10 +141,10 @@ class WallpaperCurationPipeline:
         
         # Robustness components
         self.state_manager = StateManager()
-        # Reserve 10 minutes at the end for uploads/storage even if filtering runs long
+        # Reserve 5 minutes at the end for uploads/storage (batch uploads are fast)
         self.timeout_manager = TimeoutManager(
             max_runtime_minutes=max_runtime_minutes,
-            upload_reserve_minutes=10  # Reserve time for upload stage
+            upload_reserve_minutes=5  # Reduced from 10 - uploads are fast with batching
         )
         self.memory_monitor = MemoryMonitor()
         self.health_checker = HealthChecker()
@@ -242,14 +242,13 @@ class WallpaperCurationPipeline:
         quality_config = MLQualityConfig(threshold=self.quality_threshold)
         
         # Create timeout callback for early exit when upload time approaches
-        def should_prioritize_upload() -> bool:
-            return self.timeout_manager.should_prioritize_upload()
+        # Timeout callback no longer needed - pipeline uses proper 3-pass approach
+        # that completes all scoring before embedding extraction
         
-        # Run filtering pipeline with timeout callback
+        # Run filtering pipeline
         pipeline = FilteringPipeline(
             config=self.config,
-            quality_config=quality_config,
-            timeout_callback=should_prioritize_upload
+            quality_config=quality_config
         )
         
         approved = pipeline.process_all(candidates)
