@@ -30,7 +30,7 @@ on:
       quality_threshold:
         description: 'Quality threshold (0.0-1.0)'
         required: false
-        default: '0.45'
+        default: '0.40'
       fresh_start:
         description: 'Fresh curation (clear dedup state)'
         required: false
