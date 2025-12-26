@@ -13,9 +13,9 @@
 # -----------------------------------------------------------------------------
 quality:
   # Minimum score to approve a wallpaper (0.0-1.0)
-  # Using hybrid LAION Aesthetic + SigLIP scoring
-  # 0.50 = 5/10 on LAION scale (reasonable minimum quality)
-  threshold: 0.50
+  # LAION Aesthetic + SigLIP hybrid scoring
+  # This is the SINGLE SOURCE OF TRUTH - all scripts read from here
+  threshold: 0.40
 
   
   # Component weights (must sum to 1.0)

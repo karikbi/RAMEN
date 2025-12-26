@@ -23,6 +23,7 @@ from filters import HardFilters, FilterConfig, FilterResult
 from ml_quality_scorer import MLQualityScorer, MLQualityConfig, MLQualityScore
 from embeddings import EmbeddingExtractor, EmbeddingSet
 from metadata_generator import MetadataGenerator, WallpaperMetadata
+from config_loader import get_config
 
 
 logger = logging.getLogger("wallpaper_curator")
@@ -277,7 +278,10 @@ class FilteringPipeline:
         show_progress: bool = True
     ) -> list[ApprovedWallpaper]:
         """
-        Process all candidates through the filtering pipeline.
+        Process all candidates through the filtering pipeline using two-pass approach.
+        
+        Pass 1: Hard filters only (fast, no ML)
+        Pass 2: ML scoring + embedding extraction (on passed candidates only)
         
         Args:
             candidates: List of CandidateWallpaper from Part 1.
@@ -291,34 +295,128 @@ class FilteringPipeline:
         
         logger.info(f"\n🔍 Processing {len(candidates)} candidates through filters...")
         
-        iterator = tqdm(candidates, desc="Filtering") if show_progress else candidates
+        # =====================================================================
+        # PASS 1: Hard Filters Only (Fast)
+        # =====================================================================
+        passed_candidates: list[tuple[CandidateWallpaper, FilterResult]] = []
         
-        # Check timeout every N candidates for efficiency
-        check_interval = 10
-        processed_count = 0
+        iterator = tqdm(candidates, desc="Hard Filtering") if show_progress else candidates
         
         for candidate in iterator:
             try:
-                # Check timeout callback periodically
-                if self.timeout_callback and processed_count % check_interval == 0:
-                    if self.timeout_callback():
-                        logger.warning(
-                            f"⏰ Timeout approaching - stopping filtering early after "
-                            f"{processed_count}/{len(candidates)} candidates "
-                            f"({len(approved)} approved so far)"
-                        )
-                        self.early_exit = True
-                        break
+                if candidate.filepath is None or not candidate.filepath.exists():
+                    logger.warning(f"Candidate {candidate.id} has no valid filepath")
+                    continue
                 
-                result = self.process_candidate(candidate)
-                if result:
-                    approved.append(result)
+                # Apply hard filters only
+                filter_result = self.hard_filters.apply_all_filters(
+                    candidate.filepath,
+                    candidate.id,
+                    source=candidate.source
+                )
                 
-                processed_count += 1
+                if filter_result.passed:
+                    passed_candidates.append((candidate, filter_result))
+                    self.stats.passed_hard_filters += 1
+                else:
+                    self._categorize_rejection(filter_result.reason or "unknown")
+                    self.hard_filters.reject_candidate(
+                        candidate.filepath,
+                        filter_result.reason or "unknown"
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Error in hard filter for {candidate.id}: {e}")
+                continue
+        
+        logger.info(f"✅ Hard filter pass complete: {len(passed_candidates)}/{len(candidates)} passed")
+        
+        # =====================================================================
+        # PASS 2: ML Quality Scoring + Embeddings (On Passed Candidates Only)
+        # =====================================================================
+        if not passed_candidates:
+            logger.warning("No candidates passed hard filters!")
+            self.stats.log_summary()
+            return approved
+        
+        iterator2 = tqdm(passed_candidates, desc="Quality Scoring") if show_progress else passed_candidates
+        
+        for candidate, filter_result in iterator2:
+            try:
+                # Check timeout callback
+                if self.timeout_callback and self.timeout_callback():
+                    logger.warning(
+                        f"⏰ Timeout approaching - stopping quality scoring after "
+                        f"{len(approved)} approved"
+                    )
+                    self.early_exit = True
+                    break
+                
+                # ML Quality Scoring with source-aware weights
+                ml_score, siglip_embedding = self.ml_quality_scorer.score_for_source(
+                    candidate.filepath,
+                    source=candidate.source
+                )
+                
+                # Quality Check
+                if ml_score.final_score < self.quality_config.threshold:
+                    self.stats.rejected_quality_score += 1
+                    self.hard_filters.reject_candidate(
+                        candidate.filepath,
+                        f"Quality score {ml_score.final_score:.3f} < {self.quality_config.threshold}"
+                    )
+                    continue
+                
+                self.stats.passed_quality_scoring += 1
+                
+                # Extract Remaining Embeddings
+                logger.info(f"Approved {candidate.id} (score={ml_score.final_score:.3f}) - extracting embeddings")
+                embeddings = EmbeddingSet()
+                embeddings.siglip = siglip_embedding
+                embeddings.mobilenet_v3 = self.embedding_extractor.extract_mobilenet(candidate.filepath)
+                embeddings.efficientnet_v2 = self.embedding_extractor.extract_efficientnet(candidate.filepath)
+                embeddings.dinov2 = self.embedding_extractor.extract_dinov2(candidate.filepath)
+                
+                # Generate Metadata
+                metadata = self.metadata_generator.generate_metadata(
+                    filepath=candidate.filepath,
+                    title=candidate.title,
+                    artist=candidate.artist,
+                    source=candidate.source,
+                    source_metadata=candidate.metadata,
+                    quality_score=ml_score.final_score
+                )
+                
+                # Move to approved directory
+                approved_path = self.config.approved_dir / candidate.filepath.name
+                try:
+                    shutil.copy2(str(candidate.filepath), str(approved_path))
+                    candidate.filepath.unlink()
+                except Exception as e:
+                    logger.error(f"Failed to move approved file: {e}")
+                    continue
+                
+                # Store hash
+                if filter_result.phash:
+                    self.new_hashes[candidate.id] = filter_result.phash
+                
+                self.stats.final_approved += 1
+                
+                approved.append(ApprovedWallpaper(
+                    id=metadata.id or candidate.id,
+                    source=candidate.source,
+                    filepath=approved_path,
+                    url=candidate.url,
+                    title=candidate.title,
+                    artist=candidate.artist,
+                    quality_scores=ml_score,
+                    embeddings=embeddings,
+                    metadata=metadata,
+                    phash=filter_result.phash
+                ))
                 
             except Exception as e:
                 logger.error(f"Error processing {candidate.id}: {e}")
-                processed_count += 1
                 continue
         
         # Save new hashes
@@ -328,7 +426,7 @@ class FilteringPipeline:
         
         # Log statistics
         if self.early_exit:
-            logger.info(f"\n⚠️ Early exit - processed {processed_count}/{self.stats.total_candidates} candidates")
+            logger.info(f"\n⚠️ Early exit - quality scored {self.stats.passed_quality_scoring + self.stats.rejected_quality_score}/{len(passed_candidates)} candidates")
         self.stats.log_summary()
         
         return approved
@@ -354,7 +452,7 @@ class FilteringPipeline:
 def run_part2_pipeline(
     candidates: list[CandidateWallpaper],
     config: Optional[Config] = None,
-    quality_threshold: float = 0.40  # LAION + SigLIP hybrid scoring
+    quality_threshold: Optional[float] = None  # Read from config.yaml if not specified
 ) -> list[ApprovedWallpaper]:
     """
     Run the Part 2 filtering pipeline.
@@ -362,7 +460,7 @@ def run_part2_pipeline(
     Args:
         candidates: List of candidates from Part 1.
         config: Pipeline configuration (uses default if None).
-        quality_threshold: Minimum quality score to accept.
+        quality_threshold: Minimum quality score (default: from config.yaml).
     
     Returns:
         List of approved wallpapers with embeddings and metadata.
@@ -374,7 +472,10 @@ def run_part2_pipeline(
     if config is None:
         config = Config()
     
-    # Override quality threshold if specified
+    # Get quality threshold from central config if not specified
+    if quality_threshold is None:
+        quality_threshold = get_config().get('quality.threshold', 0.40)
+    
     config.quality_threshold = quality_threshold
     
     # ML Quality config

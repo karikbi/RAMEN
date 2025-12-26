@@ -335,4 +335,73 @@ def generate_report(
     if print_summary:
         generator.print_summary(report)
     
-    return generator.save_report(report)
+    # Save detailed report
+    report_path = generator.save_report(report)
+    
+    # Also save simplified statistics.json for GitHub Actions workflow
+    save_statistics(stats, output_dir)
+    
+    return report_path
+
+
+def save_statistics(stats: PipelineStats, output_dir: Path = Path("./reports")) -> Path:
+    """
+    Save simplified statistics.json for GitHub Actions workflow.
+    
+    The workflow expects these specific field names:
+    - candidates_total
+    - approved_total  
+    - rejected_total
+    
+    Args:
+        stats: PipelineStats with all metrics.
+        output_dir: Directory to save statistics.
+    
+    Returns:
+        Path to statistics.json file.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Calculate total rejected
+    total_rejected = (
+        stats.rejected_resolution +
+        stats.rejected_file_integrity +
+        stats.rejected_aspect_ratio +
+        stats.rejected_text_detection +
+        stats.rejected_file_size +
+        stats.rejected_duplicate +
+        stats.rejected_quality_score
+    )
+    
+    statistics = {
+        "candidates_total": stats.total_candidates,
+        "approved_total": stats.approved_count,
+        "rejected_total": total_rejected,
+        "uploaded_total": stats.uploaded_count,
+        # Additional fields for debugging
+        "by_source": {
+            "reddit": stats.reddit_candidates,
+            "unsplash": stats.unsplash_candidates,
+            "pexels": stats.pexels_candidates,
+        },
+        "passed_hard_filters": stats.passed_hard_filters,
+        "passed_quality_scoring": stats.passed_quality_scoring,
+        "rejection_breakdown": {
+            "resolution": stats.rejected_resolution,
+            "file_integrity": stats.rejected_file_integrity,
+            "aspect_ratio": stats.rejected_aspect_ratio,
+            "text_detection": stats.rejected_text_detection,
+            "file_size": stats.rejected_file_size,
+            "duplicate": stats.rejected_duplicate,
+            "quality_score": stats.rejected_quality_score,
+        },
+        "timestamp": datetime.now().isoformat() + "Z",
+    }
+    
+    output_path = output_dir / "statistics.json"
+    
+    with open(output_path, "w") as f:
+        json.dump(statistics, f, indent=2)
+    
+    logger.info(f"Saved statistics to {output_path}")
+    return output_path

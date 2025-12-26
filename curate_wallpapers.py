@@ -22,6 +22,13 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Dict
 from urllib.parse import urlparse
 
+# Central config
+try:
+    from config_loader import get_config as get_central_config
+    HAS_CONFIG_LOADER = True
+except ImportError:
+    HAS_CONFIG_LOADER = False
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -54,8 +61,10 @@ class Config:
     r2_secret_key: str = field(default_factory=lambda: os.getenv("R2_SECRET_KEY", ""))
     r2_bucket_name: str = field(default_factory=lambda: os.getenv("R2_BUCKET_NAME", ""))
     
-    # Quality thresholds
-    quality_threshold: float = 0.40  # LAION + SigLIP hybrid scoring
+    # Quality thresholds (read from central config.yaml)
+    quality_threshold: float = field(default_factory=lambda: 
+        get_central_config().get('quality.threshold', 0.40) if HAS_CONFIG_LOADER else 0.40
+    )
     
     # Subreddit configurations - lowered upvote requirements for more candidates
     subreddits: list[SubredditConfig] = field(default_factory=lambda: [

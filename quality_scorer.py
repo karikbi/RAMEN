@@ -54,7 +54,9 @@ class QualityConfig:
     composition_weight: float = 0.30
     aesthetic_weight: float = 0.20
     suitability_weight: float = 0.10
-    quality_threshold: float = 0.40  # LAION + SigLIP hybrid scoring
+    # Quality threshold - kept for backwards compatibility
+    # Actual threshold is read from config.yaml via ml_quality_scorer
+    quality_threshold: float = 0.40
 
 
 class QualityScorer:

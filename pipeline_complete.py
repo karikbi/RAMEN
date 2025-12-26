@@ -52,6 +52,9 @@ from dedup_manager import (
     DedupConfig, create_dedup_system
 )
 
+# Central config
+from config_loader import get_config
+
 # Robustness imports
 from pipeline_robustness import (
     StateManager,
@@ -92,7 +95,7 @@ class WallpaperCurationPipeline:
     def __init__(
         self,
         config: Optional[Config] = None,
-        quality_threshold: float = 0.40,  # LAION + SigLIP hybrid scoring
+        quality_threshold: Optional[float] = None,  # Read from config.yaml if not specified
         skip_upload: bool = False,
         skip_part1: bool = False,
         dry_run: bool = False,
@@ -105,7 +108,7 @@ class WallpaperCurationPipeline:
         
         Args:
             config: Pipeline configuration.
-            quality_threshold: Minimum quality score to approve.
+            quality_threshold: Minimum quality score (default: from config.yaml).
             skip_upload: Skip R2 upload (for testing).
             skip_part1: Skip fetching, use existing candidates.
             dry_run: Dry-run mode - no side effects.
@@ -113,6 +116,10 @@ class WallpaperCurationPipeline:
             fresh_start: Reset deduplication system for clean curation.
         """
         self.config = config or Config()
+        
+        # Get quality threshold from central config if not specified
+        if quality_threshold is None:
+            quality_threshold = get_config().get('quality.threshold', 0.40)
         self.quality_threshold = quality_threshold
         self.skip_upload = skip_upload
         self.skip_part1 = skip_part1
@@ -736,7 +743,7 @@ class WallpaperCurationPipeline:
 
 
 async def main(
-    quality_threshold: float = 0.40,  # LAION + SigLIP hybrid scoring
+    quality_threshold: Optional[float] = None,  # Read from config.yaml if not specified
     skip_upload: bool = False,
     skip_part1: bool = False,
     dry_run: bool = False,
@@ -748,7 +755,7 @@ async def main(
     Run the complete wallpaper curation pipeline.
     
     Args:
-        quality_threshold: Minimum quality score to approve (default 0.85).
+        quality_threshold: Minimum quality score (default: from config.yaml).
         skip_upload: Skip R2 upload for testing.
         skip_part1: Skip fetching, use existing candidates.
         dry_run: Dry-run mode with no side effects.
@@ -780,8 +787,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--quality-threshold", "-q",
         type=float,
-        default=0.85,
-        help="Minimum quality score to approve (default: 0.85)"
+        default=None,  # Will read from config.yaml
+        help="Minimum quality score to approve (default: from config.yaml)"
     )
     parser.add_argument(
         "--skip-upload",
