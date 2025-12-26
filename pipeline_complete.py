@@ -34,7 +34,7 @@ from pipeline_part2 import (
     FilteringStats,
     FilterConfig,
 )
-from filters import FilterConfig
+
 from ml_quality_scorer import MLQualityConfig
 
 
@@ -282,9 +282,7 @@ class WallpaperCurationPipeline:
         
         self.stats.filter_duration_sec = time.time() - start
         
-        # Log if we exited early
-        if pipeline.early_exit:
-            logger.info("📤 Filtering ended early to prioritize uploads")
+
         
         return approved
     
