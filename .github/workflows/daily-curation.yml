@@ -282,13 +282,13 @@ jobs:
           
           # Get input values
           TEST_MODE="${{ github.event.inputs.test_mode || 'false' }}"
-          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.55' }}"
+          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.40' }}"
           FRESH_START="${{ github.event.inputs.fresh_start || 'false' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
           DEBUG="${{ github.event.inputs.debug || 'false' }}"
           
           # Build command with optional flags
-          CMD="python pipeline_complete.py --quality-threshold $QUALITY_THRESHOLD --max-runtime 50"
+          CMD="python pipeline_complete.py --quality-threshold $QUALITY_THRESHOLD --max-runtime 55"
           
           # TEST MODE: Only fetch 10 images for quick testing
           if [ "$TEST_MODE" = "true" ]; then
@@ -382,6 +382,17 @@ jobs:
         if: success()
         run: |
           echo "🔍 Running post-pipeline validation..."
+          
+          # Check if collection exists - skip validation on first run
+          if [ ! -f "./manifests/collection.json" ] && [ ! -f "./manifests/collection.json.gz" ]; then
+            echo "ℹ️ No collection file found - this is expected on first run or when upload was skipped"
+            echo "Skipping validation..."
+            
+            # Create minimal validation report indicating skip
+            echo '{"overall_passed": true, "skipped": true, "reason": "No collection file - first run or upload skipped", "total_wallpapers": 0}' > ./reports/validation_report.json
+            exit 0
+          fi
+          
           python validate_collection.py --quick-check --manifests-dir ./manifests --output ./reports/validation_report.json || {
             echo "⚠️ Validation found issues - check report"
           }

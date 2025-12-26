@@ -92,7 +92,7 @@ class WallpaperCurationPipeline:
     def __init__(
         self,
         config: Optional[Config] = None,
-        quality_threshold: float = 0.45,  # LAION + SigLIP hybrid scoring
+        quality_threshold: float = 0.40,  # LAION + SigLIP hybrid scoring
         skip_upload: bool = False,
         skip_part1: bool = False,
         dry_run: bool = False,
@@ -134,7 +134,11 @@ class WallpaperCurationPipeline:
         
         # Robustness components
         self.state_manager = StateManager()
-        self.timeout_manager = TimeoutManager(max_runtime_minutes=max_runtime_minutes)
+        # Reserve 10 minutes at the end for uploads/storage even if filtering runs long
+        self.timeout_manager = TimeoutManager(
+            max_runtime_minutes=max_runtime_minutes,
+            upload_reserve_minutes=10  # Reserve time for upload stage
+        )
         self.memory_monitor = MemoryMonitor()
         self.health_checker = HealthChecker()
         self.data_validator = DataValidator()
@@ -230,10 +234,15 @@ class WallpaperCurationPipeline:
         # Configure filtering with ML quality scoring
         quality_config = MLQualityConfig(threshold=self.quality_threshold)
         
-        # Run filtering pipeline
+        # Create timeout callback for early exit when upload time approaches
+        def should_prioritize_upload() -> bool:
+            return self.timeout_manager.should_prioritize_upload()
+        
+        # Run filtering pipeline with timeout callback
         pipeline = FilteringPipeline(
             config=self.config,
-            quality_config=quality_config
+            quality_config=quality_config,
+            timeout_callback=should_prioritize_upload
         )
         
         approved = pipeline.process_all(candidates)
@@ -260,6 +269,10 @@ class WallpaperCurationPipeline:
             self.stats.category_counts[cat] = self.stats.category_counts.get(cat, 0) + 1
         
         self.stats.filter_duration_sec = time.time() - start
+        
+        # Log if we exited early
+        if pipeline.early_exit:
+            logger.info("📤 Filtering ended early to prioritize uploads")
         
         return approved
     
@@ -723,7 +736,7 @@ class WallpaperCurationPipeline:
 
 
 async def main(
-    quality_threshold: float = 0.45,  # LAION + SigLIP hybrid scoring
+    quality_threshold: float = 0.40,  # LAION + SigLIP hybrid scoring
     skip_upload: bool = False,
     skip_part1: bool = False,
     dry_run: bool = False,

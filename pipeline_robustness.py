@@ -930,11 +930,18 @@ class TimeoutManager:
     
     GitHub Actions has a 60-minute timeout. This manager tracks elapsed time
     and triggers graceful shutdown when approaching the limit.
+    
+    Enhanced with upload_reserve_minutes to ensure uploads have time to complete.
     """
     
-    def __init__(self, max_runtime_minutes: int = 50):
+    def __init__(
+        self,
+        max_runtime_minutes: int = 50,
+        upload_reserve_minutes: int = 10
+    ):
         self.start_time = time.time()
         self.max_runtime_seconds = max_runtime_minutes * 60
+        self.upload_reserve_seconds = upload_reserve_minutes * 60
         self.warning_threshold = 0.8  # Warn at 80% of max runtime
     
     def elapsed_seconds(self) -> int:
@@ -953,6 +960,15 @@ class TimeoutManager:
         """Check if pipeline should exit gracefully to avoid timeout."""
         return self.remaining_seconds() <= 0
     
+    def should_prioritize_upload(self) -> bool:
+        """
+        Check if filtering should stop to give time for uploads.
+        
+        Returns True when remaining time equals upload_reserve_seconds,
+        signaling that filtering should wrap up so uploads can begin.
+        """
+        return self.remaining_seconds() <= self.upload_reserve_seconds
+    
     def check_and_warn(self) -> Optional[str]:
         """Check timeout status and return warning message if applicable."""
         elapsed = self.elapsed_seconds()
@@ -960,6 +976,9 @@ class TimeoutManager:
         
         if remaining <= 0:
             return f"⏰ TIMEOUT: {elapsed // 60}m elapsed, must exit now"
+        
+        if remaining <= self.upload_reserve_seconds:
+            return f"📤 UPLOAD TIME: Only {remaining // 60}m remaining, prioritizing uploads"
         
         if elapsed >= self.max_runtime_seconds * self.warning_threshold:
             return f"⏳ Warning: {remaining // 60}m remaining before timeout"
@@ -972,7 +991,9 @@ class TimeoutManager:
             "elapsed_seconds": self.elapsed_seconds(),
             "remaining_seconds": self.remaining_seconds(),
             "max_runtime_seconds": self.max_runtime_seconds,
-            "should_exit": self.should_exit_gracefully()
+            "upload_reserve_seconds": self.upload_reserve_seconds,
+            "should_exit": self.should_exit_gracefully(),
+            "should_prioritize_upload": self.should_prioritize_upload()
         }
 
 

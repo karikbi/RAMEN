@@ -105,6 +105,8 @@ class FilteringPipeline:
     2. ML-based quality scoring (using SigLIP)
     3. Embedding extraction (for approved images only)
     4. Metadata generation
+    
+    Supports timeout callback for graceful exit when upload time approaches.
     """
     
     def __init__(
@@ -112,12 +114,24 @@ class FilteringPipeline:
         config: Config,
         filter_config: Optional[FilterConfig] = None,
         quality_config: Optional[MLQualityConfig] = None,
+        timeout_callback: Optional[callable] = None,
     ):
+        """
+        Args:
+            config: Pipeline configuration.
+            filter_config: Hard filter configuration.
+            quality_config: ML quality scoring configuration.
+            timeout_callback: Optional callable that returns True when filtering
+                              should stop early to prioritize uploads.
+        """
         self.config = config
         self.filter_config = filter_config or FilterConfig()
         self.quality_config = quality_config or MLQualityConfig(
             threshold=config.quality_threshold
         )
+        
+        # Timeout callback for early exit
+        self.timeout_callback = timeout_callback
         
         # Initialize components
         self.hard_filters = HardFilters(self.filter_config)
@@ -133,6 +147,9 @@ class FilteringPipeline:
         
         # Track new hashes for saving
         self.new_hashes: dict[str, str] = {}
+        
+        # Track if we exited early due to timeout
+        self.early_exit = False
 
     
     def _categorize_rejection(self, reason: str) -> None:
@@ -276,13 +293,32 @@ class FilteringPipeline:
         
         iterator = tqdm(candidates, desc="Filtering") if show_progress else candidates
         
+        # Check timeout every N candidates for efficiency
+        check_interval = 10
+        processed_count = 0
+        
         for candidate in iterator:
             try:
+                # Check timeout callback periodically
+                if self.timeout_callback and processed_count % check_interval == 0:
+                    if self.timeout_callback():
+                        logger.warning(
+                            f"⏰ Timeout approaching - stopping filtering early after "
+                            f"{processed_count}/{len(candidates)} candidates "
+                            f"({len(approved)} approved so far)"
+                        )
+                        self.early_exit = True
+                        break
+                
                 result = self.process_candidate(candidate)
                 if result:
                     approved.append(result)
+                
+                processed_count += 1
+                
             except Exception as e:
                 logger.error(f"Error processing {candidate.id}: {e}")
+                processed_count += 1
                 continue
         
         # Save new hashes
@@ -291,6 +327,8 @@ class FilteringPipeline:
             logger.info(f"Saved {len(self.new_hashes)} new hashes")
         
         # Log statistics
+        if self.early_exit:
+            logger.info(f"\n⚠️ Early exit - processed {processed_count}/{self.stats.total_candidates} candidates")
         self.stats.log_summary()
         
         return approved
@@ -316,7 +354,7 @@ class FilteringPipeline:
 def run_part2_pipeline(
     candidates: list[CandidateWallpaper],
     config: Optional[Config] = None,
-    quality_threshold: float = 0.45  # LAION + SigLIP hybrid scoring
+    quality_threshold: float = 0.40  # LAION + SigLIP hybrid scoring
 ) -> list[ApprovedWallpaper]:
     """
     Run the Part 2 filtering pipeline.
