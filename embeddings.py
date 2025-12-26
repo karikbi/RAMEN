@@ -10,7 +10,7 @@ import os
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union, List, Dict
 
 import numpy as np
 from PIL import Image
@@ -118,12 +118,39 @@ class EmbeddingExtractor:
         """Quantize float32 embedding to int8."""
         return np.clip(embedding * 127, -128, 127).astype(np.int8)
     
-    def _load_image(self, filepath, size: tuple) -> Image.Image:
-        """Load and resize image."""
-        img = Image.open(filepath)
+    def _ensure_image(self, input_data: Union[str, Path, Image.Image], size: tuple = None) -> Image.Image:
+        """
+        Ensure input is a PIL Image and optionally resize.
+        
+        Args:
+            input_data: Filepath or PIL Image
+            size: Optional (width, height) to resize to
+            
+        Returns:
+            PIL Image (RGB)
+        """
+        if isinstance(input_data, (str, Path)):
+            img = Image.open(input_data)
+        else:
+            img = input_data
+            
         if img.mode != "RGB":
             img = img.convert("RGB")
-        return img.resize(size, Image.Resampling.LANCZOS)
+            
+        if size:
+            # Always copy if resizing to avoid modifying original if it was passed in
+            if img.size != size:
+                img = img.resize(size, Image.Resampling.LANCZOS)
+            elif isinstance(input_data, Image.Image):
+                # meaningful copy to prevent side effects if strictly needed, 
+                # but usually fine. For safety in pipeline:
+                pass
+                
+        return img
+
+    def _load_image(self, filepath, size: tuple) -> Image.Image:
+        """Legacy helper - use _ensure_image instead."""
+        return self._ensure_image(filepath, size)
     
     # =========================================================================
     # MOBILENET V3 (576-dim)
@@ -146,7 +173,7 @@ class EmbeddingExtractor:
                 logger.error(f"Failed to load MobileNetV3: {e}")
         return self._mobilenet
     
-    def extract_mobilenet(self, filepath) -> Optional[np.ndarray]:
+    def extract_mobilenet(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
         """Extract MobileNetV3 embedding (576-dim, int8)."""
         model = self._load_mobilenet()
         if model is None:
@@ -155,7 +182,7 @@ class EmbeddingExtractor:
         try:
             import tensorflow as tf
             
-            img = self._load_image(filepath, (224, 224))
+            img = self._ensure_image(input_data, (224, 224))
             img_array = np.array(img, dtype=np.float32)
             img_array = tf.keras.applications.mobilenet_v3.preprocess_input(img_array)
             img_array = np.expand_dims(img_array, axis=0)
@@ -187,7 +214,7 @@ class EmbeddingExtractor:
                 logger.error(f"Failed to load EfficientNetV2: {e}")
         return self._efficientnet
     
-    def extract_efficientnet(self, filepath) -> Optional[np.ndarray]:
+    def extract_efficientnet(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
         """Extract EfficientNetV2 embedding (1280-dim, int8)."""
         model = self._load_efficientnet()
         if model is None:
@@ -196,7 +223,7 @@ class EmbeddingExtractor:
         try:
             import tensorflow as tf
             
-            img = self._load_image(filepath, (480, 480))
+            img = self._ensure_image(input_data, (480, 480))
             img_array = np.array(img, dtype=np.float32)
             img_array = tf.keras.applications.efficientnet_v2.preprocess_input(img_array)
             img_array = np.expand_dims(img_array, axis=0)
@@ -233,7 +260,7 @@ class EmbeddingExtractor:
                 logger.error(f"Failed to load SigLIP: {e}")
         return self._siglip_model, self._siglip_processor
     
-    def extract_siglip(self, filepath) -> Optional[np.ndarray]:
+    def extract_siglip(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
         """Extract SigLIP embedding (1152-dim, float16)."""
         model, processor = self._load_siglip()
         if model is None or processor is None:
@@ -242,7 +269,7 @@ class EmbeddingExtractor:
         try:
             import torch
             
-            img = self._load_image(filepath, (384, 384))
+            img = self._ensure_image(input_data, (384, 384))
             inputs = processor(images=img, return_tensors="pt")
             
             if self.device == "cuda":
@@ -384,7 +411,7 @@ class EmbeddingExtractor:
                 logger.error(f"Failed to load DINOv2: {e}")
         return self._dinov2, self._dinov2_transform
     
-    def extract_dinov2(self, filepath) -> Optional[np.ndarray]:
+    def extract_dinov2(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
         """Extract DINOv2 embedding (1024-dim, int8)."""
         model, transform = self._load_dinov2()
         if model is None or transform is None:
@@ -393,9 +420,8 @@ class EmbeddingExtractor:
         try:
             import torch
             
-            img = Image.open(filepath)
-            if img.mode != "RGB":
-                img = img.convert("RGB")
+            # DINOv2 uses its own transform which includes resize
+            img = self._ensure_image(input_data)
             
             img_tensor = transform(img).unsqueeze(0)
             
@@ -443,6 +469,51 @@ class EmbeddingExtractor:
         # DINOv2 (1024-dim)
         embeddings.dinov2 = self.extract_dinov2(filepath)
         
+        return embeddings
+    
+    def extract_optimized(
+        self, 
+        filepath: Union[str, Path], 
+        skip_siglip: bool = False
+    ) -> EmbeddingSet:
+        """
+        Optimized extraction that loads the image once for all models.
+        
+        Args:
+            filepath: Path to the image file.
+            skip_siglip: If True, skip SigLIP extraction (e.g. if already computed).
+            
+        Returns:
+            EmbeddingSet with requested embeddings.
+        """
+        embeddings = EmbeddingSet()
+        
+        try:
+            # Load and decode image ONCE
+            with Image.open(filepath) as img:
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                    
+                # Force load into memory to allow closing file
+                img.load()
+                
+                # Create copies for processing prevents repeated I/O
+                # MobileNetV3 (576-dim)
+                embeddings.mobilenet_v3 = self.extract_mobilenet(img)
+                
+                # EfficientNetV2 (1280-dim)
+                embeddings.efficientnet_v2 = self.extract_efficientnet(img)
+                
+                # SigLIP (1152-dim)
+                if not skip_siglip:
+                    embeddings.siglip = self.extract_siglip(img)
+                
+                # DINOv2 (1024-dim)
+                embeddings.dinov2 = self.extract_dinov2(img)
+                
+        except Exception as e:
+            logger.error(f"Optimized batch extraction failed for {filepath}: {e}")
+            
         return embeddings
     
     def extract_all_with_recovery(

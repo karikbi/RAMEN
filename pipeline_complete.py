@@ -99,7 +99,7 @@ class WallpaperCurationPipeline:
         skip_upload: bool = False,
         skip_part1: bool = False,
         dry_run: bool = False,
-        max_runtime_minutes: int = 50,
+        max_runtime_minutes: int = 350,
         fresh_start: bool = False,
         test_mode: bool = False,
     ):
@@ -758,7 +758,7 @@ async def main(
     skip_upload: bool = False,
     skip_part1: bool = False,
     dry_run: bool = False,
-    max_runtime_minutes: int = 50,
+    max_runtime_minutes: int = 350,
     fresh_start: bool = False,
     test_mode: bool = False,
 ) -> list[ApprovedWallpaper]:

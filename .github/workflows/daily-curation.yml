@@ -74,7 +74,7 @@ jobs:
   curate:
     name: Curate Wallpapers
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # Extended to allow 3-pass pipeline to complete
+    timeout-minutes: 360  # Extended to 6 hours for CPU embedding extraction
     
     # Outputs for subsequent jobs or reporting
     outputs:
@@ -288,7 +288,7 @@ jobs:
           DEBUG="${{ github.event.inputs.debug || 'false' }}"
           
           # Build command with optional flags
-          CMD="python pipeline_complete.py --quality-threshold $QUALITY_THRESHOLD --max-runtime 80"
+          CMD="python pipeline_complete.py --quality-threshold $QUALITY_THRESHOLD --max-runtime 350"
           
           # TEST MODE: Only fetch 10 images for quick testing
           if [ "$TEST_MODE" = "true" ]; then
