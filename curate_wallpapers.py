@@ -19,7 +19,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Optional, Dict
+from typing import Any, Callable, Optional, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dedup_manager import DuplicateChecker
 from urllib.parse import urlparse
 
 # Central config
@@ -366,11 +369,18 @@ class RedditFetcher:
         
         return None
     
-    async def fetch_subreddit(self, session: aiohttp.ClientSession, subreddit_config: SubredditConfig) -> list[dict[str, Any]]:
+    async def fetch_subreddit(
+        self, 
+        session: aiohttp.ClientSession, 
+        subreddit_config: SubredditConfig,
+        dedup_checker: Optional["DuplicateChecker"] = None
+    ) -> list[dict[str, Any]]:
         """
-        Fetch top posts from a subreddit using OAuth API.
+        Fetch top posts from a subreddit using OAuth API with pagination (Deep Fetch).
         """
         posts = []
+        after_token = None
+        max_pages = 10  # Safety limit to prevent infinite loops
         
         # Get OAuth token if not already available
         if not self.access_token:
@@ -381,12 +391,6 @@ class RedditFetcher:
         
         url = f"{self.API_URL}/r/{subreddit_config.name}/top"
         
-        # Fetch slightly more than needed to account for filtering
-        params = {
-            "t": "month",
-            "limit": min(100, subreddit_config.fetch_count * 2) 
-        }
-        
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "User-Agent": self.user_agent
@@ -394,74 +398,110 @@ class RedditFetcher:
         
         logger.info(
             f"Fetching from r/{subreddit_config.name}: "
-            f"Target {subreddit_config.fetch_count} posts, min {subreddit_config.min_upvotes} upvotes"
+            f"Target {subreddit_config.fetch_count} NEW posts"
         )
         
-        try:
-            async with session.get(url, headers=headers, params=params) as response:
-                if response.status == 401:
-                    # Token expired, try to refresh
-                    logger.warning("Reddit OAuth token expired, refreshing...")
-                    self.access_token = await self._get_access_token(session)
-                    if not self.access_token:
-                        return []
-                    # Retry with new token
-                    headers["Authorization"] = f"Bearer {self.access_token}"
-                    async with session.get(url, headers=headers, params=params) as retry_response:
-                        if retry_response.status != 200:
-                            logger.error(f"Reddit error after token refresh: {retry_response.status}")
-                            return []
-                        data = await retry_response.json()
-                elif response.status == 429:
-                    logger.warning(f"Rate limited by Reddit on r/{subreddit_config.name}")
-                    return []
-                elif response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"Reddit error {response.status}: {error_text[:500]}")
-                    return []
-                else:
-                    data = await response.json()
+        for page in range(max_pages):
+            # Stop if we have enough candidates
+            if len(posts) >= subreddit_config.fetch_count:
+                break
                 
-                children = data.get("data", {}).get("children", [])
-                
-                for child in children:
-                    post = child.get("data", {})
-                    
-                    # Skip if below upvote threshold
-                    if post.get("score", 0) < subreddit_config.min_upvotes:
-                        continue
-                    
-                    # Skip deleted/removed posts
-                    if post.get("removed_by_category") or post.get("selftext") == "[deleted]":
-                        continue
-                    
-                    # Skip NSFW
-                    if post.get("over_18"):
-                        continue
-                    
-                    # Extract image URL
-                    image_url = self._extract_image_url(post)
-                    if not image_url:
-                        continue
-                    
-                    posts.append({
-                        "id": post.get("id"),
-                        "title": post.get("title"),
-                        "subreddit": subreddit_config.name,
-                        "upvotes": post.get("score"),
-                        "author": post.get("author", "[deleted]"),
-                        "post_url": f"https://reddit.com{post.get('permalink')}",
-                        "image_url": image_url,
-                        "created_utc": post.get("created_utc"),
-                    })
-                    
-                    if len(posts) >= subreddit_config.fetch_count:
+            params = {
+                "t": "month",
+                "limit": 100,
+                "after": after_token
+            }
+            
+            try:
+                async with session.get(url, headers=headers, params=params) as response:
+                    if response.status == 401:
+                        # Token expired loop handling could be here, but simplifying for now
+                        logger.warning("Reddit OAuth token expired")
                         break
+                    elif response.status == 429:
+                        logger.warning(f"Rate limited by Reddit on r/{subreddit_config.name}")
+                        break
+                    elif response.status != 200:
+                        logger.error(f"Reddit error {response.status}")
+                        break
+                    
+                    data = await response.json()
+                    response_data = data.get("data", {})
+                    children = response_data.get("children", [])
+                    after_token = response_data.get("after")
+                    
+                    if not children:
+                        break
+                    
+                    skipped_dupes = 0
+                    
+                    for child in children:
+                        post = child.get("data", {})
+                        
+                        # Dedup Check BEFORE processing
+                        post_id = post.get("id")
+                        full_id = f"reddit_{post_id}"
+                        
+                        if dedup_checker:
+                            is_dup, _ = dedup_checker.check_id(full_id)
+                            if is_dup:
+                                skipped_dupes += 1
+                                continue
+                        
+                        # Use duplicate checker's generic quick check if available (bloom filter)
+                        if dedup_checker and not dedup_checker.quick_check(full_id):
+                             # Bloom says "maybe in set", but check_id above handled "definitely in set"
+                             # So this is just a double check or for future optimizations
+                             pass
+
+                        # Skip if below upvote threshold
+                        if post.get("score", 0) < subreddit_config.min_upvotes:
+                            continue
+                        
+                        # Skip deleted/removed/NSFW
+                        if (post.get("removed_by_category") or 
+                            post.get("selftext") == "[deleted]" or 
+                            post.get("over_18")):
+                            continue
+                        
+                        # Extract image URL
+                        image_url = self._extract_image_url(post)
+                        if not image_url:
+                            continue
+                            
+                        # Check URL duplicate if possible
+                        if dedup_checker:
+                            is_dup, _ = dedup_checker.check_url(image_url)
+                            if is_dup:
+                                skipped_dupes += 1
+                                continue
+                        
+                        posts.append({
+                            "id": post_id,
+                            "title": post.get("title"),
+                            "subreddit": subreddit_config.name,
+                            "upvotes": post.get("score"),
+                            "author": post.get("author", "[deleted]"),
+                            "post_url": f"https://reddit.com{post.get('permalink')}",
+                            "image_url": image_url,
+                            "created_utc": post.get("created_utc"),
+                        })
+                        
+                        if len(posts) >= subreddit_config.fetch_count:
+                            break
+                    
+                    logger.info(f"  Page {page+1}: Found {len(children)} posts, {skipped_dupes} duplicates skipped. Total new: {len(posts)}")
+                    
+                    if not after_token:
+                        break
+                        
+                    # Be nice to Reddit
+                    await asyncio.sleep(1.0)
+            
+            except Exception as e:
+                logger.error(f"Error fetching page {page} from r/{subreddit_config.name}: {e}")
+                break
         
-        except Exception as e:
-            logger.error(f"Error fetching from r/{subreddit_config.name}: {e}")
-        
-        logger.info(f"Fetched {len(posts)} posts from r/{subreddit_config.name}")
         return posts
     
     async def _fetch_via_rss(self, session: aiohttp.ClientSession, subreddit_config: SubredditConfig) -> list[dict[str, Any]]:
@@ -540,7 +580,11 @@ class RedditFetcher:
         logger.info(f"Fetched {len(posts)} posts from r/{subreddit_config.name} via RSS")
         return posts
     
-    async def fetch_all(self, session: aiohttp.ClientSession) -> list[dict[str, Any]]:
+    async def fetch_all(
+        self, 
+        session: aiohttp.ClientSession,
+        dedup_checker: Optional["DuplicateChecker"] = None
+    ) -> list[dict[str, Any]]:
         """Fetch from all configured subreddits. Uses OAuth if available, RSS as fallback."""
         all_posts = []
         use_rss = False
@@ -554,7 +598,7 @@ class RedditFetcher:
             if use_rss:
                 posts = await self._fetch_via_rss(session, subreddit_config)
             else:
-                posts = await self.fetch_subreddit(session, subreddit_config)
+                posts = await self.fetch_subreddit(session, subreddit_config, dedup_checker)
                 # If OAuth fails, switch to RSS for remaining subreddits
                 if len(posts) == 0 and not self.access_token:
                     logger.warning("OAuth failed - switching to RSS feeds for remaining subreddits")
@@ -584,66 +628,60 @@ class UnsplashFetcher:
             "Accept-Version": "v1",
         }
     
-    async def fetch_curated_photos(self, session: aiohttp.ClientSession) -> list[dict[str, Any]]:
+    async def fetch_curated_photos(
+        self, 
+        session: aiohttp.ClientSession,
+        dedup_checker: Optional["DuplicateChecker"] = None
+    ) -> list[dict[str, Any]]:
         """
-        Fetch photos from Unsplash curated/editorial collections.
-        
-        Args:
-            session: aiohttp client session.
-        
-        Returns:
-            List of photo data dictionaries.
+        Fetch photos from Unsplash curated/editorial collections with pagination.
         """
         photos = []
         
         # Fetch from curated photos endpoint (editorial picks)
         try:
-            # Get collections (the /collections/featured endpoint was deprecated in 2021)
-            collections_url = f"{self.BASE_URL}/collections"
-            params = {"per_page": 10}
+            # We will iterate until we hit the count or run out of pages
+            page = 1
+            max_pages = 10
             
-            async with session.get(collections_url, headers=self.headers, params=params) as response:
-                if response.status == 200:
-                    collections = await response.json()
-                    logger.info(f"Found {len(collections)} featured collections")
-                else:
-                    logger.warning(f"Failed to fetch collections: {response.status}")
-                    collections = []
-            
-            # Fetch photos from collections
-            for collection in collections[:5]:  # Limit to first 5 collections
-                collection_id = collection.get("id")
-                photos_url = f"{self.BASE_URL}/collections/{collection_id}/photos"
-                params = {"per_page": 10, "orientation": "landscape"}
-                
-                await asyncio.sleep(self.config.request_delay)
-                
-                async with session.get(photos_url, headers=self.headers, params=params) as response:
-                    if response.status == 200:
-                        collection_photos = await response.json()
-                        for photo in collection_photos:
-                            photos.append(self._parse_photo(photo))
-                    else:
-                        logger.warning(f"Failed to fetch photos from collection {collection_id}: {response.status}")
-                
-                if len(photos) >= self.config.unsplash_count:
-                    break
-            
-            # If we didn't get enough from collections, fetch from editorial
-            if len(photos) < self.config.unsplash_count:
+            while len(photos) < self.config.unsplash_count and page <= max_pages:
                 editorial_url = f"{self.BASE_URL}/photos"
                 params = {
-                    "per_page": self.config.unsplash_count - len(photos),
+                    "per_page": 30,  # Fetch a batch
                     "order_by": "popular",
+                    "page": page
                 }
                 
+                logger.info(f"Fetching Unsplash page {page}...")
+                
                 async with session.get(editorial_url, headers=self.headers, params=params) as response:
-                    if response.status == 200:
-                        editorial_photos = await response.json()
-                        for photo in editorial_photos:
-                            photos.append(self._parse_photo(photo))
-                    else:
-                        logger.warning(f"Failed to fetch editorial photos: {response.status}")
+                    if response.status != 200:
+                        logger.warning(f"Failed to fetch Unsplash photos: {response.status}")
+                        break
+                        
+                    batch = await response.json()
+                    if not batch:
+                        break
+                    
+                    skipped = 0
+                    for photo in batch:
+                        # Dedup check
+                        photo_id = photo.get("id")
+                        full_id = f"unsplash_{photo_id}"
+                        
+                        if dedup_checker:
+                            is_dup, _ = dedup_checker.check_id(full_id)
+                            if is_dup:
+                                skipped += 1
+                                continue
+                        
+                        photos.append(self._parse_photo(photo))
+                        if len(photos) >= self.config.unsplash_count:
+                            break
+                    
+                    logger.info(f"  Unsplash page {page}: {len(batch)} items, {skipped} skipped. Total: {len(photos)}")
+                    page += 1
+                    await asyncio.sleep(self.config.request_delay)
         
         except Exception as e:
             logger.error(f"Error fetching from Unsplash: {e}")
@@ -686,31 +724,56 @@ class PexelsFetcher:
             "Authorization": config.pexels_api_key,
         }
     
-    async def fetch_curated_photos(self, session: aiohttp.ClientSession) -> list[dict[str, Any]]:
+    async def fetch_curated_photos(
+        self, 
+        session: aiohttp.ClientSession,
+        dedup_checker: Optional["DuplicateChecker"] = None
+    ) -> list[dict[str, Any]]:
         """
-        Fetch photos from Pexels curated endpoint.
-        
-        Args:
-            session: aiohttp client session.
-        
-        Returns:
-            List of photo data dictionaries.
+        Fetch photos from Pexels curated endpoint with pagination.
         """
         photos = []
+        page = 1
+        max_pages = 10
         
         try:
-            curated_url = f"{self.BASE_URL}/curated"
-            params = {
-                "per_page": self.config.pexels_count,
-            }
-            
-            async with session.get(curated_url, headers=self.headers, params=params) as response:
-                if response.status == 200:
+            while len(photos) < self.config.pexels_count and page <= max_pages:
+                curated_url = f"{self.BASE_URL}/curated"
+                params = {
+                    "per_page": 40,
+                    "page": page
+                }
+                
+                logger.info(f"Fetching Pexels page {page}...")
+                
+                async with session.get(curated_url, headers=self.headers, params=params) as response:
+                    if response.status != 200:
+                        logger.warning(f"Failed to fetch from Pexels: {response.status}")
+                        break
+                        
                     data = await response.json()
-                    for photo in data.get("photos", []):
+                    batch = data.get("photos", [])
+                    if not batch:
+                        break
+                        
+                    skipped = 0
+                    for photo in batch:
+                        photo_id = str(photo.get("id"))
+                        full_id = f"pexels_{photo_id}"
+                        
+                        if dedup_checker:
+                            is_dup, _ = dedup_checker.check_id(full_id)
+                            if is_dup:
+                                skipped += 1
+                                continue
+                        
                         photos.append(self._parse_photo(photo))
-                else:
-                    logger.warning(f"Failed to fetch from Pexels: {response.status}")
+                        if len(photos) >= self.config.pexels_count:
+                            break
+                    
+                    logger.info(f"  Pexels page {page}: {len(batch)} items, {skipped} skipped. Total: {len(photos)}")
+                    page += 1
+                    await asyncio.sleep(self.config.request_delay)
         
         except Exception as e:
             logger.error(f"Error fetching from Pexels: {e}")
@@ -793,199 +856,153 @@ class ImageDownloader:
 # MAIN PIPELINE
 # =============================================================================
 
-async def fetch_reddit_candidates(
+async def fetch_candidates(
     config: Config,
-    session: aiohttp.ClientSession,
-    downloader: ImageDownloader,
+    test_mode: bool = False,
+    dedup_checker: Optional["DuplicateChecker"] = None
 ) -> list[CandidateWallpaper]:
-    """
-    Fetch and download wallpaper candidates from Reddit.
+    """Fetch candidates from all sources."""
     
-    Args:
-        config: Pipeline configuration.
-        session: aiohttp client session.
-        downloader: Image downloader instance.
+    # In test mode, reduce fetch counts drastically
+    if test_mode:
+        logger.info("🧪 TEST MODE: Using reduced fetch counts")
+        # Configure test limits
+        for sub in config.subreddits:
+            sub.fetch_count = 5
+        config.unsplash_count = 2
+        config.pexels_count = 3
     
-    Returns:
-        List of CandidateWallpaper objects.
-    """
     candidates = []
-    fetcher = RedditFetcher(config)
+    downloader = ImageDownloader(config)
+
+    connector = aiohttp.TCPConnector(limit=10)
+    timeout = aiohttp.ClientTimeout(total=300)
     
-    try:
-        # Pass session to fetch_all
-        posts = await fetcher.fetch_all(session)
-        logger.info(f"Processing {len(posts)} Reddit posts...")
-        
-        for post in posts:
-            try:
-                # Determine filename
-                ext = get_file_extension(post["image_url"])
-                filename = f"reddit_{post['subreddit']}_{post['id']}{ext}"
-                filepath = config.candidates_dir / filename
-                
-                # Download image
-                success = await downloader.download_image(session, post["image_url"], filepath)
-                
-                if success:
-                    candidates.append(CandidateWallpaper(
-                        id=f"reddit_{post['id']}",
-                        source="reddit",
-                        filepath=filepath,
-                        url=post["image_url"],
-                        title=post["title"],
-                        artist=post["author"],
-                        metadata={
-                            "subreddit": post["subreddit"],
-                            "upvotes": post["upvotes"],
-                            "post_url": post["post_url"],
-                            "created_utc": post["created_utc"],
-                        },
-                    ))
-                
-                await asyncio.sleep(config.request_delay)
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+        # 1. Reddit
+        if config.reddit_client_id and config.reddit_client_secret:
+            logger.info("\n📱 Fetching from Reddit...")
+            reddit_fetcher = RedditFetcher(config)
+            reddit_posts = await reddit_fetcher.fetch_all(session, dedup_checker)
+            logger.info(f"Processing {len(reddit_posts)} Reddit posts...")
             
-            except Exception as e:
-                logger.warning(f"Failed to process Reddit post {post['id']}: {e}")
-                continue
-    
-    except Exception as e:
-        logger.error(f"Error in Reddit fetching: {e}")
+            for post in reddit_posts:
+                try:
+                    ext = get_file_extension(post["image_url"])
+                    filename = f"reddit_{post['subreddit']}_{post['id']}{ext}"
+                    filepath = config.candidates_dir / filename
+                    
+                    success = await downloader.download_image(session, post["image_url"], filepath)
+                    
+                    if success:
+                        candidates.append(CandidateWallpaper(
+                            id=f"reddit_{post['id']}",
+                            source="reddit",
+                            filepath=filepath,
+                            url=post["image_url"],
+                            title=post["title"],
+                            artist=post["author"],
+                            metadata={
+                                "subreddit": post["subreddit"],
+                                "upvotes": post["upvotes"],
+                                "post_url": post["post_url"],
+                                "created_utc": post["created_utc"],
+                            },
+                        ))
+                    await asyncio.sleep(config.request_delay)
+                except Exception as e:
+                    logger.warning(f"Failed to process Reddit post {post['id']}: {e}")
+                    continue
+        else:
+            logger.warning("Skipping Reddit: missing API keys")
+
+        # 2. Unsplash
+        if config.unsplash_access_key:
+            logger.info("\n📷 Fetching from Unsplash...")
+            unsplash_fetcher = UnsplashFetcher(config)
+            unsplash_photos = await unsplash_fetcher.fetch_curated_photos(session, dedup_checker)
+            logger.info(f"Processing {len(unsplash_photos)} Unsplash photos...")
+            
+            for photo in unsplash_photos:
+                try:
+                    ext = get_file_extension(photo["photo_url"])
+                    filename = f"unsplash_{photo['id']}{ext}"
+                    filepath = config.candidates_dir / filename
+                    
+                    success = await downloader.download_image(session, photo["photo_url"], filepath)
+                    
+                    if success:
+                        candidates.append(CandidateWallpaper(
+                            id=f"unsplash_{photo['id']}",
+                            source="unsplash",
+                            filepath=filepath,
+                            url=photo["photo_url"],
+                            title=photo.get("description", "Untitled"),
+                            artist=photo["photographer"],
+                            metadata={
+                                "photographer_url": photo["photographer_url"],
+                                "unsplash_url": photo.get("unsplash_url", ""),
+                                "download_url": photo.get("download_url", ""),
+                                "width": photo.get("width"),
+                                "height": photo.get("height"),
+                                "license": photo["license"],
+                            },
+                        ))
+                    await asyncio.sleep(config.request_delay)
+                except Exception as e:
+                    logger.warning(f"Failed to process Unsplash photo {photo['id']}: {e}")
+                    continue
+        else:
+            logger.warning("Skipping Unsplash: missing API key")
+
+        # 3. Pexels
+        if config.pexels_api_key:
+            logger.info("\n🖼️ Fetching from Pexels...")
+            pexels_fetcher = PexelsFetcher(config)
+            pexels_photos = await pexels_fetcher.fetch_curated_photos(session, dedup_checker)
+            logger.info(f"Processing {len(pexels_photos)} Pexels photos...")
+            
+            for photo in pexels_photos:
+                try:
+                    ext = get_file_extension(photo["photo_url"])
+                    filename = f"pexels_{photo['id']}{ext}"
+                    filepath = config.candidates_dir / filename
+                    
+                    success = await downloader.download_image(session, photo["photo_url"], filepath)
+                    
+                    if success:
+                        candidates.append(CandidateWallpaper(
+                            id=f"pexels_{photo['id']}",
+                            source="pexels",
+                            filepath=filepath,
+                            url=photo["photo_url"],
+                            title=f"Photo by {photo['photographer']}",
+                            artist=photo["photographer"],
+                            metadata={
+                                "photographer_url": photo["photographer_url"],
+                                "pexels_url": photo.get("pexels_url", ""),
+                                "width": photo.get("width"),
+                                "height": photo.get("height"),
+                                "license": photo["license"],
+                            },
+                        ))
+                    await asyncio.sleep(config.request_delay)
+                except Exception as e:
+                    logger.warning(f"Failed to process Pexels photo {photo['id']}: {e}")
+                    continue
+        else:
+            logger.warning("Skipping Pexels: missing API key")
     
     return candidates
 
 
-async def fetch_unsplash_candidates(
-    config: Config,
-    session: aiohttp.ClientSession,
-    downloader: ImageDownloader,
-) -> list[CandidateWallpaper]:
-    """
-    Fetch and download wallpaper candidates from Unsplash.
-    
-    Args:
-        config: Pipeline configuration.
-        session: aiohttp client session.
-        downloader: Image downloader instance.
-    
-    Returns:
-        List of CandidateWallpaper objects.
-    """
-    candidates = []
-    fetcher = UnsplashFetcher(config)
-    
-    try:
-        photos = await fetcher.fetch_curated_photos(session)
-        logger.info(f"Processing {len(photos)} Unsplash photos...")
-        
-        for photo in photos:
-            try:
-                # Determine filename
-                ext = get_file_extension(photo["photo_url"])
-                filename = f"unsplash_{photo['id']}{ext}"
-                filepath = config.candidates_dir / filename
-                
-                # Download image
-                success = await downloader.download_image(session, photo["photo_url"], filepath)
-                
-                if success:
-                    candidates.append(CandidateWallpaper(
-                        id=f"unsplash_{photo['id']}",
-                        source="unsplash",
-                        filepath=filepath,
-                        url=photo["photo_url"],
-                        title=photo.get("description", "Untitled"),
-                        artist=photo["photographer"],
-                        metadata={
-                            "photographer_url": photo["photographer_url"],
-                            "unsplash_url": photo.get("unsplash_url", ""),
-                            "download_url": photo.get("download_url", ""),
-                            "width": photo.get("width"),
-                            "height": photo.get("height"),
-                            "license": photo["license"],
-                        },
-                    ))
-                
-                await asyncio.sleep(config.request_delay)
-            
-            except Exception as e:
-                logger.warning(f"Failed to process Unsplash photo {photo['id']}: {e}")
-                continue
-    
-    except Exception as e:
-        logger.error(f"Error in Unsplash fetching: {e}")
-    
-    return candidates
-
-
-async def fetch_pexels_candidates(
-    config: Config,
-    session: aiohttp.ClientSession,
-    downloader: ImageDownloader,
-) -> list[CandidateWallpaper]:
-    """
-    Fetch and download wallpaper candidates from Pexels.
-    
-    Args:
-        config: Pipeline configuration.
-        session: aiohttp client session.
-        downloader: Image downloader instance.
-    
-    Returns:
-        List of CandidateWallpaper objects.
-    """
-    candidates = []
-    fetcher = PexelsFetcher(config)
-    
-    try:
-        photos = await fetcher.fetch_curated_photos(session)
-        logger.info(f"Processing {len(photos)} Pexels photos...")
-        
-        for photo in photos:
-            try:
-                # Determine filename
-                ext = get_file_extension(photo["photo_url"])
-                filename = f"pexels_{photo['id']}{ext}"
-                filepath = config.candidates_dir / filename
-                
-                # Download image
-                success = await downloader.download_image(session, photo["photo_url"], filepath)
-                
-                if success:
-                    candidates.append(CandidateWallpaper(
-                        id=f"pexels_{photo['id']}",
-                        source="pexels",
-                        filepath=filepath,
-                        url=photo["photo_url"],
-                        title=f"Photo by {photo['photographer']}",
-                        artist=photo["photographer"],
-                        metadata={
-                            "photographer_url": photo["photographer_url"],
-                            "pexels_url": photo.get("pexels_url", ""),
-                            "width": photo.get("width"),
-                            "height": photo.get("height"),
-                            "license": photo["license"],
-                        },
-                    ))
-                
-                await asyncio.sleep(config.request_delay)
-            
-            except Exception as e:
-                logger.warning(f"Failed to process Pexels photo {photo['id']}: {e}")
-                continue
-    
-    except Exception as e:
-        logger.error(f"Error in Pexels fetching: {e}")
-    
-    return candidates
-
-
-async def main(test_mode: bool = False) -> list[CandidateWallpaper]:
+async def main(test_mode: bool = False, dedup_checker: Optional["DuplicateChecker"] = None) -> list[CandidateWallpaper]:
     """
     Main entry point for the wallpaper curation pipeline Part 1.
     
     Args:
         test_mode: If True, fetch only 10 wallpapers (5 Reddit, 2 Unsplash, 3 Pexels)
+        dedup_checker: An optional DuplicateChecker instance to prevent fetching duplicates.
     
     Returns:
         List of all CandidateWallpaper objects fetched and downloaded.
@@ -996,24 +1013,6 @@ async def main(test_mode: bool = False) -> list[CandidateWallpaper]:
     
     # Initialize configuration
     config = Config()
-    
-    # TEST MODE: Override config to fetch only 10 wallpapers
-    if test_mode:
-        logger.info("🧪 TEST MODE: Fetching only 10 wallpapers")
-        logger.info("   - Reddit: 5 (1 from each of top 5 subreddits)")
-        logger.info("   - Unsplash: 2")
-        logger.info("   - Pexels: 3")
-        
-        # Override subreddit configs to fetch just 1 each from top 5
-        config.subreddits = [
-            SubredditConfig("wallpapers", 1, 50),
-            SubredditConfig("EarthPorn", 1, 50),
-            SubredditConfig("Amoledbackgrounds", 1, 50),
-            SubredditConfig("spaceporn", 1, 50),
-            SubredditConfig("CityPorn", 1, 50),
-        ]
-        config.unsplash_count = 2
-        config.pexels_count = 3
     
     # Validate configuration
     errors = config.validate()
@@ -1026,50 +1025,21 @@ async def main(test_mode: bool = False) -> list[CandidateWallpaper]:
     # Create directories
     create_directories(config)
     
-    # Initialize downloader
-    downloader = ImageDownloader(config)
     
-    # Track candidates by source
-    reddit_candidates: list[CandidateWallpaper] = []
-    unsplash_candidates: list[CandidateWallpaper] = []
-    pexels_candidates: list[CandidateWallpaper] = []
+    # 1. Fetch candidates
+    all_candidates = await fetch_candidates(config, test_mode, dedup_checker)
     
-    # Create aiohttp session with connection pooling
-    connector = aiohttp.TCPConnector(limit=10)
-    timeout = aiohttp.ClientTimeout(total=300)
-
+    # Summary logging (count by source)
+    reddit_count = sum(1 for c in all_candidates if c.source == 'reddit')
+    unsplash_count = sum(1 for c in all_candidates if c.source == 'unsplash')
+    pexels_count = sum(1 for c in all_candidates if c.source == 'pexels')
     
-    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-        # Fetch from all sources (can be parallelized if needed)
-        
-        # Reddit (uses public JSON API)
-        logger.info("\n📱 Fetching from Reddit...")
-        reddit_candidates = await fetch_reddit_candidates(config, session, downloader)
-        
-        # Unsplash
-        if config.unsplash_access_key:
-            logger.info("\n📷 Fetching from Unsplash...")
-            unsplash_candidates = await fetch_unsplash_candidates(config, session, downloader)
-        else:
-            logger.warning("Skipping Unsplash: missing API key")
-        
-        # Pexels
-        if config.pexels_api_key:
-            logger.info("\n🖼️ Fetching from Pexels...")
-            pexels_candidates = await fetch_pexels_candidates(config, session, downloader)
-        else:
-            logger.warning("Skipping Pexels: missing API key")
-    
-    # Combine all candidates
-    all_candidates = reddit_candidates + unsplash_candidates + pexels_candidates
-    
-    # Summary logging
     logger.info("\n" + "=" * 60)
     logger.info("FETCHING COMPLETE - SUMMARY")
     logger.info("=" * 60)
-    logger.info(f"  Reddit:   {len(reddit_candidates)} candidates")
-    logger.info(f"  Unsplash: {len(unsplash_candidates)} candidates")
-    logger.info(f"  Pexels:   {len(pexels_candidates)} candidates")
+    logger.info(f"  Reddit:   {reddit_count} candidates")
+    logger.info(f"  Unsplash: {unsplash_count} candidates")
+    logger.info(f"  Pexels:   {pexels_count} candidates")
     logger.info("-" * 60)
     logger.info(f"  TOTAL:    {len(all_candidates)} candidates downloaded")
     logger.info(f"  Location: {config.candidates_dir.absolute()}")

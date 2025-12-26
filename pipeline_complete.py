@@ -25,7 +25,7 @@ from typing import Optional
 from tqdm import tqdm
 
 # Part 1 imports
-from curate_wallpapers import Config, CandidateWallpaper, main as fetch_candidates
+from curate_wallpapers import Config, CandidateWallpaper, fetch_candidates
 
 # Part 2 imports
 from pipeline_part2 import (
@@ -48,7 +48,7 @@ from reporting import PipelineStats, ReportGenerator, generate_report
 
 # Deduplication imports
 from dedup_manager import (
-    DuplicateIndex, DuplicateChecker, R2DedupSync,
+    DuplicateIndex, DuplicateChecker, DedupSync,
     DedupConfig, create_dedup_system
 )
 
@@ -186,6 +186,7 @@ class WallpaperCurationPipeline:
             Path("./pipeline_state"),
             Path("./manifest_cache"),
             Path("./source_stats.json"),
+            Path("manifests/dedup_index.json.gz"),
         ]
         
         logger.info("🧹 Clearing deduplication state for fresh start...")
@@ -211,7 +212,11 @@ class WallpaperCurationPipeline:
         logger.info("=" * 70)
         
         start = time.time()
-        candidates = await fetch_candidates(test_mode=self.test_mode)
+        candidates = await fetch_candidates(
+            config=self.config,
+            test_mode=self.test_mode,
+            dedup_checker=self.dedup_checker
+        )
         self.stats.fetch_duration_sec = time.time() - start
         
         # Count by source
@@ -248,7 +253,8 @@ class WallpaperCurationPipeline:
         # Run filtering pipeline
         pipeline = FilteringPipeline(
             config=self.config,
-            quality_config=quality_config
+            quality_config=quality_config,
+            dedup_checker=self.dedup_checker
         )
         
         approved = pipeline.process_all(candidates)
@@ -349,10 +355,10 @@ class WallpaperCurationPipeline:
                     filepath=wp.filepath
                 )
         
-        # Save dedup index to R2
+        # Save dedup index to Repo and R2
         if self.dedup_sync and self.dedup_index:
-            logger.info("📤 Syncing dedup index to R2...")
-            self.dedup_sync.upload_index(self.dedup_index)
+            logger.info("📤 Syncing dedup index (Repo + R2)...")
+            self.dedup_sync.sync_index(self.dedup_index)
         
         # Update source statistics
         logger.info("📈 Updating source statistics...")
@@ -456,17 +462,23 @@ class WallpaperCurationPipeline:
         
         # Initialize deduplication system
         logger.info("\n🔍 Initializing deduplication system...")
-        if r2_client and r2_config.bucket_name:
-            self.dedup_index, self.dedup_checker, self.dedup_sync = create_dedup_system(
-                r2_client=r2_client,
-                bucket=r2_config.bucket_name,
-                config=DedupConfig(sync_to_r2=True)
-            )
-            logger.info(f"Loaded dedup index: {self.dedup_index.get_stats()}")
-        else:
-            self.dedup_index = DuplicateIndex()
-            self.dedup_checker = DuplicateChecker(self.dedup_index)
-            logger.info("Using local-only dedup index (R2 not configured)")
+        
+        # We always want to use the persistent repo storage
+        repo_dedup_path = Path("manifests/dedup_index.json.gz")
+        dedup_config = DedupConfig(
+            sync_to_r2=True,
+            repo_path=repo_dedup_path
+        )
+        
+        # Initialize with or without R2
+        self.dedup_index, self.dedup_checker, self.dedup_sync = create_dedup_system(
+            r2_client=r2_client if r2_config.bucket_name else None,
+            bucket=r2_config.bucket_name if r2_config.bucket_name else "",
+            config=dedup_config
+        )
+        
+        if self.dedup_index:
+             logger.info(f"Loaded dedup index: {self.dedup_index.get_stats()}")
         
         # Initialize R2 manifest manager
         if r2_client and r2_config.bucket_name:

@@ -11,7 +11,7 @@ import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 
 import imagehash
 from PIL import Image
@@ -58,8 +58,10 @@ class FilterConfig:
 class HardFilters:
     """Applies hard filters to reject unsuitable wallpaper candidates."""
     
-    def __init__(self, config: FilterConfig):
+    
+    def __init__(self, config: FilterConfig, dedup_checker: Optional[Any] = None):
         self.config = config
+        self.dedup_checker = dedup_checker
         self.config.rejected_dir.mkdir(parents=True, exist_ok=True)
         self.existing_hashes: dict[str, str] = {}
         self._load_existing_hashes()
@@ -216,7 +218,7 @@ class HardFilters:
             logger.debug(f"OCR check failed: {e}")
             return True, 0.0, ""  # Pass if OCR fails
     
-    def check_duplicate(self, img: Image.Image, candidate_id: str) -> Tuple[bool, Optional[str], str]:
+    def check_duplicate_local(self, img: Image.Image, candidate_id: str) -> Tuple[bool, Optional[str], str]:
         """Check for duplicates using perceptual hash."""
         try:
             phash = imagehash.phash(img)
@@ -292,17 +294,34 @@ class HardFilters:
         if not text_ok:
             return FilterResult(passed=False, reason=reason, width=width, height=height, aspect_ratio=aspect)
         
-        # Duplicate check
-        dup_ok, phash, reason = self.check_duplicate(img, candidate_id)
-        if not dup_ok:
-            return FilterResult(passed=False, reason=reason, width=width, height=height, 
-                              aspect_ratio=aspect, phash=phash)
-        
-        return FilterResult(
-            passed=True,
-            width=width,
-            height=height,
-            file_size=file_size,
-            aspect_ratio=aspect,
-            phash=phash
-        )
+        if self.dedup_checker:
+            # Use the robust dedup checker (R2-synced)
+            is_dup, match_id, reason = self.dedup_checker.full_check(
+                wp_id=candidate_id,
+                url="",  # URL check usually done before download, but could pass here if needed
+                filepath=filepath,
+                img=img
+            )
+            
+            if is_dup:
+                return FilterResult(passed=False, reason=reason, width=width, height=height, 
+                                  aspect_ratio=aspect)
+            else:
+                phash = str(imagehash.phash(img))  # Only needed for result
+                return FilterResult(passed=True, width=width, height=height, 
+                                  file_size=file_size, aspect_ratio=aspect, phash=phash)
+        else:
+            # Fallback to local existing_hashes.json
+            dup_ok, phash, reason = self.check_duplicate_local(img, candidate_id)
+            if not dup_ok:
+                return FilterResult(passed=False, reason=reason, width=width, height=height, 
+                                  aspect_ratio=aspect, phash=phash)
+            
+            return FilterResult(
+                passed=True,
+                width=width,
+                height=height,
+                file_size=file_size,
+                aspect_ratio=aspect,
+                phash=phash
+            )

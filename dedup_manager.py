@@ -62,6 +62,9 @@ class DedupConfig:
     
     # Local cache
     local_cache_dir: Path = field(default_factory=lambda: Path("./dedup_cache"))
+    
+    # GitHub Repo Persistence
+    repo_path: Optional[Path] = None  # Path to commit to repo (e.g., manifests/dedup_index.json.gz)
 
 
 # =============================================================================
@@ -434,120 +437,133 @@ class DuplicateChecker:
 # R2 SYNC FOR DEDUP INDEX
 # =============================================================================
 
-class R2DedupSync:
+class DedupSync:
     """
-    Syncs deduplication index to/from Cloudflare R2.
+    Syncs deduplication index to/from persistent storage (Repo + R2).
     
-    Enables persistence of dedup data across pipeline runs
-    when running on ephemeral environments like GitHub Actions.
+    Enables persistence of dedup data across pipeline runs.
+    Prioritizes Repo path (git tracked) over R2.
     """
     
     def __init__(
         self,
-        r2_client,
-        bucket: str,
+        r2_client=None,
+        bucket: str = "",
         index_key: str = "dedup/index.json.gz",
-        local_cache_dir: Path = Path("./dedup_cache")
+        local_cache_dir: Path = Path("./dedup_cache"),
+        repo_path: Optional[Path] = None
     ):
         self.r2_client = r2_client
         self.bucket = bucket
         self.index_key = index_key
         self.local_cache_dir = local_cache_dir
         self.local_cache_path = local_cache_dir / "index.json.gz"
+        self.repo_path = repo_path
         
         # Ensure cache directory exists
         self.local_cache_dir.mkdir(parents=True, exist_ok=True)
     
     def download_index(self) -> Optional[DuplicateIndex]:
         """
-        Download dedup index from R2.
+        Load dedup index (Repo -> R2 -> Local Cache).
         
         Returns:
             DuplicateIndex if found, None otherwise.
         """
-        if self.r2_client is None:
-            logger.warning("R2 client not configured, skipping index download")
-            return self._load_local_cache()
+        # 1. Try Repo Path (Git tracked)
+        if self.repo_path and self.repo_path.exists():
+            try:
+                logger.info(f"📂 Loading dedup index from repo: {self.repo_path}")
+                with open(self.repo_path, "rb") as f:
+                    compressed_data = f.read()
+                
+                json_data = gzip.decompress(compressed_data).decode("utf-8")
+                data = json.loads(json_data)
+                
+                index = DuplicateIndex.from_dict(data)
+                self._log_stats(index, "Loaded from repo")
+                return index
+            except Exception as e:
+                logger.warning(f"Failed to load form repo path {self.repo_path}: {e}")
+
+        if self.r2_client and self.bucket and not self.repo_path:
+            try:
+                logger.info(f"📥 Downloading dedup index from R2: {self.index_key}")
+                
+                response = self.r2_client.get_object(
+                    Bucket=self.bucket,
+                    Key=self.index_key
+                )
+                
+                # Read and decompress
+                compressed_data = response["Body"].read()
+                json_data = gzip.decompress(compressed_data).decode("utf-8")
+                data = json.loads(json_data)
+                
+                index = DuplicateIndex.from_dict(data)
+                self._log_stats(index, "Loaded from R2")
+                
+                return index
+                
+            except self.r2_client.exceptions.NoSuchKey:
+                logger.info("No existing dedup index found in R2")
+            except Exception as e:
+                logger.warning(f"Failed to download dedup index from R2: {e}")
         
-        try:
-            logger.info(f"📥 Downloading dedup index from R2: {self.index_key}")
-            
-            response = self.r2_client.get_object(
-                Bucket=self.bucket,
-                Key=self.index_key
-            )
-            
-            # Read and decompress
-            compressed_data = response["Body"].read()
-            json_data = gzip.decompress(compressed_data).decode("utf-8")
-            data = json.loads(json_data)
-            
-            index = DuplicateIndex.from_dict(data)
-            stats = index.get_stats()
-            
-            logger.info(
-                f"✅ Loaded dedup index: {stats['urls']} URLs, {stats['ids']} IDs, "
-                f"{stats['phashes']} phashes, {stats['content_hashes']} content hashes"
-            )
-            
-            # Save to local cache
-            self._save_local_cache(index)
-            
-            return index
-            
-        except self.r2_client.exceptions.NoSuchKey:
-            logger.info("No existing dedup index found in R2, starting fresh")
-            return DuplicateIndex()
-        except Exception as e:
-            logger.warning(f"Failed to download dedup index from R2: {e}")
-            return self._load_local_cache()
+        # 3. Try Local Cache
+        return self._load_local_cache()
     
-    def upload_index(self, index: DuplicateIndex) -> bool:
+    def sync_index(self, index: DuplicateIndex) -> bool:
         """
-        Upload dedup index to R2.
-        
-        Args:
-            index: DuplicateIndex to upload.
-        
-        Returns:
-            True if successful, False otherwise.
+        Save dedup index to persistent storage.
         """
-        if self.r2_client is None:
-            logger.warning("R2 client not configured, saving to local cache only")
-            self._save_local_cache(index)
-            return False
+        success = True
         
-        try:
-            logger.info(f"📤 Uploading dedup index to R2: {self.index_key}")
-            
-            # Serialize and compress
-            json_data = json.dumps(index.to_dict())
-            compressed_data = gzip.compress(json_data.encode("utf-8"))
-            
-            self.r2_client.put_object(
-                Bucket=self.bucket,
-                Key=self.index_key,
-                Body=compressed_data,
-                ContentType="application/gzip"
-                # Note: Removed ContentEncoding to avoid boto3 checksum mismatch
-                # The file is stored as compressed bytes (.gz extension indicates compression)
-            )
-            
-            stats = index.get_stats()
-            logger.info(
-                f"✅ Uploaded dedup index: {stats['urls']} URLs, {stats['ids']} IDs, "
-                f"{stats['phashes']} phashes, {stats['content_hashes']} content hashes"
-            )
-            
-            # Save to local cache as well
-            self._save_local_cache(index)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to upload dedup index to R2: {e}")
-            self._save_local_cache(index)
-            return False
+        # 1. Save to Repo Path (Primary)
+        if self.repo_path:
+            try:
+                logger.info(f"💾 Saving dedup index to repo: {self.repo_path}")
+                self.repo_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                json_data = json.dumps(index.to_dict())
+                compressed_data = gzip.compress(json_data.encode("utf-8"))
+                
+                with open(self.repo_path, "wb") as f:
+                    f.write(compressed_data)
+            except Exception as e:
+                logger.error(f"Failed to save to repo path: {e}")
+                success = False
+
+        # 2. Upload to R2 (Only if not using repo path)
+        if self.r2_client and self.bucket and not self.repo_path:
+            try:
+                logger.info(f"📤 Uploading dedup index to R2: {self.index_key}")
+                
+                # Serialize and compress
+                json_data = json.dumps(index.to_dict())
+                compressed_data = gzip.compress(json_data.encode("utf-8"))
+                
+                self.r2_client.put_object(
+                    Bucket=self.bucket,
+                    Key=self.index_key,
+                    Body=compressed_data,
+                    ContentType="application/gzip"
+                )
+                
+                self._log_stats(index, "Uploaded to R2")
+                
+            except Exception as e:
+                logger.error(f"Failed to upload dedup index to R2: {e}")
+        
+        return success
+
+    def _log_stats(self, index: DuplicateIndex, action: str) -> None:
+        """Helper to log index stats."""
+        stats = index.get_stats()
+        logger.info(
+            f"✅ {action}: {stats['urls']} URLs, {stats['ids']} IDs, "
+            f"{stats['phashes']} phashes, {stats['content_hashes']} content hashes"
+        )
     
     def _save_local_cache(self, index: DuplicateIndex) -> None:
         """Save index to local cache file."""
@@ -591,7 +607,7 @@ def create_dedup_system(
     r2_client=None,
     bucket: str = "",
     config: Optional[DedupConfig] = None
-) -> Tuple[DuplicateIndex, DuplicateChecker, Optional[R2DedupSync]]:
+) -> Tuple[DuplicateIndex, DuplicateChecker, Optional[DedupSync]]:
     """
     Factory function to create the complete dedup system.
     
@@ -601,27 +617,28 @@ def create_dedup_system(
         config: Deduplication configuration.
     
     Returns:
-        Tuple of (DuplicateIndex, DuplicateChecker, R2DedupSync or None)
+        Tuple of (DuplicateIndex, DuplicateChecker, DedupSync or None)
     """
     config = config or DedupConfig()
     
-    # Create R2 sync if client provided
-    r2_sync = None
-    if r2_client and bucket:
-        r2_sync = R2DedupSync(
+    # Create Sync Manager (Repo + R2)
+    sync_manager = None
+    if config.repo_path or (r2_client and bucket):
+        sync_manager = DedupSync(
             r2_client=r2_client,
             bucket=bucket,
             index_key=config.r2_index_key,
-            local_cache_dir=config.local_cache_dir
+            local_cache_dir=config.local_cache_dir,
+            repo_path=config.repo_path
         )
         
         # Download existing index
-        index = r2_sync.download_index() or DuplicateIndex()
+        index = sync_manager.download_index() or DuplicateIndex()
     else:
         index = DuplicateIndex()
-        logger.info("R2 not configured, using fresh dedup index")
+        logger.info("Storage not configured, using fresh dedup index")
     
     # Create checker
     checker = DuplicateChecker(index, config)
     
-    return index, checker, r2_sync
+    return index, checker, sync_manager

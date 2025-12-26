@@ -11,7 +11,7 @@ import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import numpy as np
 from tqdm import tqdm
@@ -117,21 +117,24 @@ class FilteringPipeline:
         config: Config,
         filter_config: Optional[FilterConfig] = None,
         quality_config: Optional[MLQualityConfig] = None,
+        dedup_checker: Optional[Any] = None,
     ):
         """
         Args:
             config: Pipeline configuration.
             filter_config: Hard filter configuration.
             quality_config: ML quality scoring configuration.
+            dedup_checker: Deduplication checker instance.
         """
         self.config = config
         self.filter_config = filter_config or FilterConfig()
         self.quality_config = quality_config or MLQualityConfig(
             threshold=config.quality_threshold
         )
+        self.dedup_checker = dedup_checker
         
         # Initialize components
-        self.hard_filters = HardFilters(self.filter_config)
+        self.hard_filters = HardFilters(self.filter_config, dedup_checker=self.dedup_checker)
         self.embedding_extractor = EmbeddingExtractor()
         self.ml_quality_scorer = MLQualityScorer(
             embedding_extractor=self.embedding_extractor,
@@ -471,7 +474,8 @@ class FilteringPipeline:
 def run_part2_pipeline(
     candidates: list[CandidateWallpaper],
     config: Optional[Config] = None,
-    quality_threshold: Optional[float] = None  # Read from config.yaml if not specified
+    quality_threshold: Optional[float] = None,  # Read from config.yaml if not specified
+    dedup_checker: Optional[Any] = None
 ) -> list[ApprovedWallpaper]:
     """
     Run the Part 2 filtering pipeline.
@@ -503,7 +507,8 @@ def run_part2_pipeline(
     # Run pipeline
     pipeline = FilteringPipeline(
         config=config,
-        quality_config=quality_config
+        quality_config=quality_config,
+        dedup_checker=dedup_checker
     )
     
     approved = pipeline.process_all(candidates)
