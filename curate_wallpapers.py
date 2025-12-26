@@ -49,6 +49,9 @@ class Config:
     """Central configuration for the wallpaper curation pipeline."""
     
     # API Credentials (loaded from environment)
+    reddit_client_id: str = field(default_factory=lambda: os.getenv("REDDIT_CLIENT_ID", ""))
+    reddit_client_secret: str = field(default_factory=lambda: os.getenv("REDDIT_CLIENT_SECRET", ""))
+    
     # Reddit no longer requires keys for this public JSON method
     # User-Agent must be descriptive per Reddit's guidelines
     reddit_user_agent: str = field(default_factory=lambda: os.getenv(
