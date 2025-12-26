@@ -412,8 +412,9 @@ class RedditFetcher:
             params = {
                 "t": "month",
                 "limit": 100,
-                "after": after_token
             }
+            if after_token:
+                params["after"] = after_token
             
             try:
                 async with session.get(url, headers=headers, params=params) as response:
@@ -450,12 +451,6 @@ class RedditFetcher:
                             if is_dup:
                                 skipped_dupes += 1
                                 continue
-                        
-                        # Use duplicate checker's generic quick check if available (bloom filter)
-                        if dedup_checker and not dedup_checker.quick_check(full_id):
-                             # Bloom says "maybe in set", but check_id above handled "definitely in set"
-                             # So this is just a double check or for future optimizations
-                             pass
 
                         # Skip if below upvote threshold
                         if post.get("score", 0) < subreddit_config.min_upvotes:
