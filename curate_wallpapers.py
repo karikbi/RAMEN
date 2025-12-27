@@ -887,10 +887,11 @@ async def fetch_candidates(
     
     # In test mode, reduce fetch counts drastically
     if test_mode:
-        logger.info("🧪 TEST MODE: Using reduced fetch counts")
-        # Configure test limits
-        for sub in config.subreddits:
-            sub.fetch_count = 5
+        logger.info("🧪 TEST MODE: Using reduced fetch counts (5 Reddit, 2 Unsplash, 3 Pexels)")
+        # Configure test limits - only use first subreddit to get exactly 5 Reddit wallpapers
+        if config.subreddits:
+            config.subreddits = [config.subreddits[0]]  # Keep only first subreddit
+            config.subreddits[0].fetch_count = 5
         config.unsplash_count = 2
         config.pexels_count = 3
     

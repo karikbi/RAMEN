@@ -324,60 +324,118 @@ class MetadataExtractor:
         vocabulary: dict,
         precomputed_embeddings: Optional[np.ndarray],
         top_k: int = 2,
-        threshold: float = 0.5  # Standard probability threshold
+        threshold: float = 0.5,
+        method: str = "multi_label"  # "multi_label" or "single_label"
     ) -> List[Tuple[str, float]]:
-        """Classify image against a vocabulary using sigmoid probability."""
+        """
+        Classify image against a vocabulary.
+        
+        Args:
+            image_embedding: Image embedding vector
+            vocabulary: Dict of {label: prompt}
+            precomputed_embeddings: Normalized text embeddings
+            top_k: Number of results to return
+            threshold: Probability threshold (for multi_label)
+            method: "multi_label" (independent sigmoid) or "single_label" (softmax)
+            
+        Returns:
+            List of (label, score) tuples
+        """
         if precomputed_embeddings is None:
             logger.debug("Classification skipped: precomputed_embeddings is None")
             return []
         
         try:
-            # Ensure consistent dtype for dot product (text embeddings are float32)
+            # Ensure consistent dtype
             image_embedding = image_embedding.astype(np.float32)
             
-            # Compute raw logits (cosine similarity)
+            # CRITICAL: Normalize image embedding to unit length
+            # This ensures dot product with normalized text embeddings = true cosine similarity
+            # Without this, unnormalized embeddings produce artificially low values
+            norm = np.linalg.norm(image_embedding)
+            if norm > 1e-8:
+                image_embedding = image_embedding / norm
+            else:
+                logger.warning("Image embedding has near-zero norm, cannot normalize")
+                return []
+            
+            # Compute raw logits (cosine similarity since both normalized)
+            # Range [-1, 1], typically [0.15, 0.30] for matches
             logits = np.dot(precomputed_embeddings, image_embedding)
             
-            # Apply SigLIP probability transformation: sigmoid(logit * exp(scale) + bias)
-            if self.logit_scale is not None and self.logit_bias is not None:
-                # Use model-specific scaling if available
-                scale = np.exp(self.logit_scale)
-                bias = self.logit_bias
-                scaled_logits = (logits * scale) + bias
-                probs = 1 / (1 + np.exp(-scaled_logits))
-            else:
-                # Fallback: Treat raw cosine similarity as score (not ideal, explains low values)
-                # Raw cosine is usually 0.1-0.3 for SigLIP, so we just pass it through
-                # This path should mostly not be taken now that we extract params
-                probs = logits
-            
-            # Log score statistics
-            if len(probs) > 0:
-                min_score = float(np.min(probs))
-                max_score = float(np.max(probs))
-                mean_score = float(np.mean(probs))
-                logger.info(f"Class probabilities: min={min_score:.3f}, max={max_score:.3f}, mean={mean_score:.3f}")
-            
-            # Get top-k above threshold
+            # Log raw statistics to debug low probabilities
+            if logger.isEnabledFor(logging.DEBUG):
+                l_min, l_max, l_mean = np.min(logits), np.max(logits), np.mean(logits)
+                logger.debug(f"Raw logits (cos sim): min={l_min:.4f}, max={l_max:.4f}, mean={l_mean:.4f}")
+
             vocab_keys = list(vocabulary.keys())
-            results = []
             
-            for i, score in enumerate(probs):
-                if score >= threshold:
-                    results.append((vocab_keys[i], float(score)))
-            
-            results.sort(key=lambda x: x[1], reverse=True)
-            
-            # Info log: Show top 3 scores if no results pass threshold
-            if not results and len(probs) > 0:
-                top_indices = np.argsort(probs)[-3:][::-1]
-                top_items = [(vocab_keys[i], float(probs[i])) for i in top_indices]
-                logger.info(
-                    f"No items passed threshold {threshold:.2f}. "
-                    f"Top 3 prob matches: {top_items}"
-                )
-            
-            return results[:top_k]
+            if method == "single_label":
+                # For categories/composition: Pick the BEST match regardless of absolute score.
+                # Use Softmax.
+                # Scale logits by learned scale (or default ~100) to sharpen distribution
+                scale = np.exp(self.logit_scale) if self.logit_scale is not None else 100.0
+                scaled_logits = logits * scale
+                
+                # Softmax
+                exp_logits = np.exp(scaled_logits - np.max(scaled_logits)) # Stable softmax
+                probs = exp_logits / np.sum(exp_logits)
+                
+                # Sort all
+                results = []
+                for i, prob in enumerate(probs):
+                    results.append((vocab_keys[i], float(prob)))
+                results.sort(key=lambda x: x[1], reverse=True)
+                
+                # Check confidence of top result against a minimal reasonable threshold?
+                # For softmax, if one is much higher than others, it's confident.
+                return results[:top_k]
+                
+            else:
+                # For Moods/Styles: Independent checks.
+                # Use Sigmoid with learned parameters OR raw cosine threshold.
+                
+                # If the learned bias is -16, it effectively demands cosine similarity > 0.15.
+                # If logits are all < 0.10, probabilities will be ~0.
+                
+                # We use the learned parameters if available, but fallback to raw threshold if all fail?
+                # No, let's respect the model but with a "soft" check.
+                
+                if self.logit_scale is not None and self.logit_bias is not None:
+                    scale = np.exp(self.logit_scale)
+                    bias = self.logit_bias
+                    scaled_logits = (logits * scale) + bias
+                    probs = 1 / (1 + np.exp(-scaled_logits))
+                else:
+                    # Fallback if params missing
+                    probs = logits
+                
+                # If ALL probabilities are extremely low (<0.01), specifically check raw logits
+                # This handles cases where the bias is too aggressive for the prompt/domain.
+                if np.max(probs) < 0.01:
+                    # Fallback: check if any raw cosine similarity is decent (>0.15)
+                    # This is an "Adaptive threshold"
+                    adaptive_mask = logits > 0.15
+                    if np.any(adaptive_mask):
+                        logger.debug("Probabilities low, falling back to raw cosine > 0.15")
+                        probs = logits  # Treat raw cosine as score for ranking
+                        threshold = 0.15 # Use raw threshold
+                
+                # Log score statistics
+                if len(probs) > 0:
+                    min_score = float(np.min(probs))
+                    max_score = float(np.max(probs))
+                    mean_score = float(np.mean(probs))
+                    logger.debug(f"Class probabilities: min={min_score:.3f}, max={max_score:.3f}, mean={mean_score:.3f}")
+                
+                results = []
+                for i, score in enumerate(probs):
+                    if score >= threshold:
+                        results.append((vocab_keys[i], float(score)))
+                
+                results.sort(key=lambda x: x[1], reverse=True)
+                
+                return results[:top_k]
             
         except Exception as e:
             logger.warning(
@@ -400,24 +458,24 @@ class MetadataExtractor:
         if self._category_embeddings is None:
             self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
         
-        if self._category_embeddings is None:
-            self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
-        
+        # Use single_label logic (Softmax) to ensure we always get a category
         results = self._classify_against_vocabulary(
             image_embedding,
             CATEGORY_VOCABULARY,
             self._category_embeddings,
             top_k=top_k,
-            threshold=0.40  # Probability threshold
+            threshold=0.0, # Ignored for single_label
+            method="single_label"
         )
         
         if not results:
-            logger.debug("Category classification returned empty (below prob threshold 0.40)")
             return "general", [], 0.0
         
         primary = results[0][0]
         confidence = results[0][1]
-        subcats = [r[0] for r in results[1:]]
+        
+        # Subcategories are just the next best ones, if valid confidence
+        subcats = [r[0] for r in results[1:] if r[1] > 0.1]
         
         return primary, subcats, confidence
     
@@ -431,7 +489,8 @@ class MetadataExtractor:
             MOOD_VOCABULARY,
             self._mood_embeddings,
             top_k=top_k,
-            threshold=0.50  # Standard probability threshold
+            threshold=0.40,  # Standard probability threshold (will fallback if needed)
+            method="multi_label"
         )
         
         return [r[0] for r in results]
@@ -446,7 +505,8 @@ class MetadataExtractor:
             STYLE_VOCABULARY,
             self._style_embeddings,
             top_k=top_k,
-            threshold=0.50  # Standard probability threshold
+            threshold=0.40,  # Standard probability threshold (will fallback if needed)
+            method="multi_label"
         )
         
         return [r[0] for r in results]
@@ -456,12 +516,14 @@ class MetadataExtractor:
         if self._composition_embeddings is None:
             self._composition_embeddings = self._precompute_text_embeddings(COMPOSITION_VOCABULARY)
         
+        # Use single_label (Softmax)
         results = self._classify_against_vocabulary(
             image_embedding,
             COMPOSITION_VOCABULARY,
             self._composition_embeddings,
             top_k=1,
-            threshold=0.40
+            threshold=0.0,
+            method="single_label"
         )
         
         return results[0][0] if results else "balanced"
