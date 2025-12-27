@@ -392,56 +392,37 @@ class MetadataExtractor:
                 return results[:top_k]
                 
             else:
-                # For Moods/Styles: Independent checks.
-                # Use Sigmoid with learned parameters OR raw cosine threshold.
+                # For Moods/Styles: Use RAW cosine similarity directly
+                # The sigmoid with bias -16 is too aggressive for subjective aesthetics
+                # Wallpaper mood/style classification typically has cosine similarities of 0.03-0.10
+                # so we use the raw values with a low threshold instead of sigmoid
                 
-                # If the learned bias is -16, it effectively demands cosine similarity > 0.15.
-                # If logits are all < 0.10, probabilities will be ~0.
+                # Use raw cosine similarities as scores (they're already in 0-1 range for normalized vectors)
+                probs = logits
                 
-                # We use the learned parameters if available, but fallback to raw threshold if all fail?
-                # No, let's respect the model but with a "soft" check.
-                
-                if self.logit_scale is not None and self.logit_bias is not None:
-                    scale = np.exp(self.logit_scale)
-                    bias = self.logit_bias
-                    scaled_logits = (logits * scale) + bias
-                    probs = 1 / (1 + np.exp(-scaled_logits))
-                else:
-                    # Fallback if params missing
-                    probs = logits
-                
-                # If ALL probabilities are extremely low (<0.01), specifically check raw logits
-                # This handles cases where the bias is too aggressive for the prompt/domain.
-                max_prob = np.max(probs)
-                if max_prob < 0.01:
-                    # Fallback: check if any raw cosine similarity is decent (>0.15)
-                    # This is an "Adaptive threshold"
-                    adaptive_mask = logits > 0.15
-                    if np.any(adaptive_mask):
-                        logger.info(f"Probabilities low (max={max_prob:.4f}), falling back to raw cosine > 0.15")
-                        probs = logits  # Treat raw cosine as score for ranking
-                        threshold = 0.15 # Use raw threshold
-                    else:
-                        logger.info(f"All probabilities < 0.01 (max={max_prob:.4f}) and no raw logits > 0.15. "
-                                  f"Max raw logit: {np.max(logits):.4f}")
+                # Use a very low threshold since these are raw cosine values, not probabilities
+                # Typical values are 0.03-0.08 for subjective aesthetic matches
+                raw_threshold = 0.04  # This captures the top matches
                 
                 # Log score statistics
                 if len(probs) > 0:
                     min_score = float(np.min(probs))
                     max_score = float(np.max(probs))
                     mean_score = float(np.mean(probs))
-                    logger.info(f"Class probabilities: min={min_score:.3f}, max={max_score:.3f}, mean={mean_score:.3f}, threshold={threshold:.3f}")
+                    logger.info(f"Raw cosine scores: min={min_score:.4f}, max={max_score:.4f}, mean={mean_score:.4f}")
                 
                 results = []
                 for i, score in enumerate(probs):
-                    if score >= threshold:
+                    if score >= raw_threshold:
                         results.append((vocab_keys[i], float(score)))
                 
                 results.sort(key=lambda x: x[1], reverse=True)
                 
                 if not results:
-                    logger.info(f"No results passed threshold {threshold:.3f}. Top 3 scores: "
-                              f"{[(vocab_keys[i], float(probs[i])) for i in np.argsort(probs)[-3:][::-1]]}")
+                    # If nothing passes threshold, just take the top 2 anyway
+                    top_indices = np.argsort(probs)[-top_k:][::-1]
+                    results = [(vocab_keys[i], float(probs[i])) for i in top_indices]
+                    logger.info(f"No results passed threshold {raw_threshold:.3f}, returning top {top_k}: {results}")
                 
                 return results[:top_k]
             
