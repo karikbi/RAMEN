@@ -28,9 +28,9 @@ on:
         type: boolean
         default: false
       quality_threshold:
-        description: 'Quality threshold (0.0-1.0)'
+        description: 'Quality threshold (0.0-1.0) - leave empty to use config.yaml'
         required: false
-        default: '0.40'
+        default: ''
       fresh_start:
         description: 'Fresh curation (clear dedup state)'
         required: false
@@ -282,10 +282,19 @@ jobs:
           
           # Get input values
           TEST_MODE="${{ github.event.inputs.test_mode || 'false' }}"
-          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold || '0.40' }}"
+          QUALITY_THRESHOLD="${{ github.event.inputs.quality_threshold }}"
           FRESH_START="${{ github.event.inputs.fresh_start || 'false' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
           DEBUG="${{ github.event.inputs.debug || 'false' }}"
+          
+          # If quality threshold not provided, read from config.yaml
+          if [ -z "$QUALITY_THRESHOLD" ]; then
+            echo "📖 Reading quality threshold from config.yaml..."
+            QUALITY_THRESHOLD=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['quality']['threshold'])")
+            echo "   Using threshold from config: $QUALITY_THRESHOLD"
+          else
+            echo "   Using manual threshold: $QUALITY_THRESHOLD"
+          fi
           
           # Build command with optional flags
           CMD="python pipeline_complete.py --quality-threshold $QUALITY_THRESHOLD --max-runtime 350"
