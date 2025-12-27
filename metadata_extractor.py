@@ -468,7 +468,7 @@ class MetadataExtractor:
         
         return primary, subcats, confidence
     
-    def classify_mood(self, image_embedding: np.ndarray, top_k: int = 2) -> List[str]:
+    def classify_mood(self, image_embedding: np.ndarray, top_k: int = 3) -> List[str]:
         """Classify image mood using zero-shot classification."""
         if self._mood_embeddings is None:
             self._mood_embeddings = self._precompute_text_embeddings(MOOD_VOCABULARY)
@@ -484,7 +484,7 @@ class MetadataExtractor:
         
         return [r[0] for r in results]
     
-    def classify_style(self, image_embedding: np.ndarray, top_k: int = 2) -> List[str]:
+    def classify_style(self, image_embedding: np.ndarray, top_k: int = 3) -> List[str]:
         """Classify image style using zero-shot classification."""
         if self._style_embeddings is None:
             self._style_embeddings = self._precompute_text_embeddings(STYLE_VOCABULARY)
