@@ -256,7 +256,7 @@ class FilteringPipeline:
         logger.info(f"Approved {candidate.id} (score={ml_score.final_score:.3f}) - extracting embeddings")
         embeddings = EmbeddingSet()
         embeddings.siglip = siglip_embedding
-        embeddings.mobilenet_v3 = self.embedding_extractor.extract_mobilenet(candidate.filepath)
+        embeddings.mobilenet_v4 = self.embedding_extractor.extract_mobilenet_v4(candidate.filepath)
         embeddings.efficientnet_v2 = self.embedding_extractor.extract_efficientnet(candidate.filepath)
         embeddings.dinov2 = self.embedding_extractor.extract_dinov2(candidate.filepath)
 
@@ -434,9 +434,9 @@ class FilteringPipeline:
                     candidate.filepath, 
                     skip_siglip=True
                 )
-                embeddings.mobilenet_v3 = other_embeddings.mobilenet_v3
+                embeddings.mobilenet_v4 = other_embeddings.mobilenet_v4
                 embeddings.efficientnet_v2 = other_embeddings.efficientnet_v2
-                embeddings.dinov2 = other_embeddings.dinov2
+                embeddings.dinov3 = other_embeddings.dinov3
                 
                 # Generate Metadata with ML classification
                 metadata = self.metadata_generator.generate_metadata(

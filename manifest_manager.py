@@ -130,10 +130,10 @@ class ManifestManager:
             "artist_url": meta.artist_url,
             "license": meta.license_type,
             "embeddings": {
-                "mobilenet_v3": self._encode_embedding(embeddings.mobilenet_v3),
+                "mobilenet_v4": self._encode_embedding(embeddings.mobilenet_v4),
                 "efficientnet_v2": self._encode_embedding(embeddings.efficientnet_v2),
                 "siglip": self._encode_embedding(embeddings.siglip),
-                "dinov2": self._encode_embedding(embeddings.dinov2),
+                "dinov3": self._encode_embedding(embeddings.dinov3),
             },
             "composition": {
                 "type": meta.composition_type,

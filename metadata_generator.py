@@ -139,7 +139,17 @@ class CategoryClassifier:
             import torch
             
             # Convert numpy embedding to torch tensor
-            image_tensor = torch.from_numpy(image_embedding).unsqueeze(0)
+            # Ensure float32 to match category_text_features dtype
+            image_tensor = torch.from_numpy(image_embedding).unsqueeze(0).float()
+            
+            # Validate dtype compatibility
+            if self.category_text_features.dtype != torch.float32:
+                logger.warning(
+                    f"Category text features dtype mismatch: "
+                    f"expected float32, got {self.category_text_features.dtype}. "
+                    f"Converting to float32."
+                )
+                self.category_text_features = self.category_text_features.float()
             
             if self.device == "cuda":
                 image_tensor = image_tensor.cuda()
@@ -165,6 +175,7 @@ class CategoryClassifier:
             
         except Exception as e:
             logger.warning(f"ML category classification failed: {e}")
+            logger.debug(f"Classification error details:", exc_info=True)
             return []
 
 
