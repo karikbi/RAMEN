@@ -64,30 +64,30 @@ CATEGORY_VOCABULARY = {
 }
 
 MOOD_VOCABULARY = {
-    "calm": "an image conveying a calm, peaceful, and serene atmosphere",
-    "dramatic": "an image conveying a dramatic, intense, and striking atmosphere",
-    "mysterious": "an image conveying a mysterious, dark, and enigmatic atmosphere",
-    "energetic": "an image conveying an energetic, dynamic, and lively atmosphere",
-    "romantic": "an image conveying a romantic, soft, and dreamy atmosphere",
-    "melancholic": "an image conveying a melancholic, sad, or lonely atmosphere",
-    "inspiring": "an image conveying an inspiring, uplifting, and hopeful atmosphere",
-    "cozy": "an image conveying a cozy, warm, and comfortable atmosphere",
-    "epic": "an image conveying an epic, grand, and majestic atmosphere",
-    "surreal": "an image conveying a surreal, dreamlike, and fantastical atmosphere",
+    "calm": "calm peaceful serene wallpaper scene",
+    "dramatic": "dramatic intense moody wallpaper with strong contrast",
+    "mysterious": "mysterious dark enigmatic wallpaper atmosphere",
+    "energetic": "vibrant energetic dynamic colorful wallpaper",
+    "romantic": "romantic soft dreamy wallpaper with warm tones",
+    "melancholic": "melancholic sad lonely wallpaper with muted colors",
+    "inspiring": "inspiring uplifting hopeful wallpaper scene",
+    "cozy": "cozy warm comfortable wallpaper atmosphere",
+    "epic": "epic grand majestic wallpaper landscape",
+    "surreal": "surreal dreamlike fantastical wallpaper scene",
 }
 
 STYLE_VOCABULARY = {
-    "nord": "an image with the nord color palette using cool blue and gray tones",
-    "gruvbox": "an image with the gruvbox color palette using retro orange and brown tones",
-    "dracula": "an image with the dracula color theme using dark purple and vampire tones",
-    "monokai": "an image with the monokai color theme using dark background and vibrant accents",
-    "solarized": "an image with the solarized color palette using warm yellow and blue tones",
-    "catppuccin": "an image with the catppuccin pastel color palette",
-    "cyberpunk": "an image in the cyberpunk style with neon lights and high-tech aesthetics",
-    "vaporwave": "an image in the vaporwave style with retro 80s pink and purple aesthetics",
-    "minimalist": "an image in the minimalist style with clean lines and simplicity",
-    "vintage": "an image in the vintage style with film grain and retro processing",
-    "natural": "an image in the natural style with organic earthy green and brown tones",
+    "nord": "cool blue gray nordic wallpaper palette",
+    "gruvbox": "retro orange brown warm wallpaper palette",
+    "dracula": "dark purple vampire themed wallpaper",
+    "monokai": "dark wallpaper with vibrant accent colors",
+    "solarized": "warm yellow blue balanced wallpaper palette",
+    "catppuccin": "pastel soft colors wallpaper palette",
+    "cyberpunk": "cyberpunk neon lights futuristic city wallpaper",
+    "vaporwave": "vaporwave retro pink purple aesthetic wallpaper",
+    "minimalist": "minimalist simple clean wallpaper with negative space",
+    "vintage": "vintage retro wallpaper with film grain and faded colors",
+    "natural": "natural organic earthy green brown wallpaper",
 }
 
 COMPOSITION_VOCABULARY = {
@@ -497,7 +497,7 @@ class MetadataExtractor:
             MOOD_VOCABULARY,
             self._mood_embeddings,
             top_k=top_k,
-            threshold=0.20,  # Lowered from 0.40 - sigmoid(0.15*108-16.35)=0.46, so 0.20 is reasonable
+            threshold=0.05,  # Lowered for subjective wallpaper aesthetics
             method="multi_label"
         )
         
@@ -513,7 +513,7 @@ class MetadataExtractor:
             STYLE_VOCABULARY,
             self._style_embeddings,
             top_k=top_k,
-            threshold=0.20,  # Lowered from 0.40 - sigmoid(0.15*108-16.35)=0.46, so 0.20 is reasonable
+            threshold=0.05,  # Lowered for subjective wallpaper aesthetics
             method="multi_label"
         )
         
