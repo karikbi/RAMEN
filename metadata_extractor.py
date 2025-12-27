@@ -412,21 +412,25 @@ class MetadataExtractor:
                 
                 # If ALL probabilities are extremely low (<0.01), specifically check raw logits
                 # This handles cases where the bias is too aggressive for the prompt/domain.
-                if np.max(probs) < 0.01:
+                max_prob = np.max(probs)
+                if max_prob < 0.01:
                     # Fallback: check if any raw cosine similarity is decent (>0.15)
                     # This is an "Adaptive threshold"
                     adaptive_mask = logits > 0.15
                     if np.any(adaptive_mask):
-                        logger.debug("Probabilities low, falling back to raw cosine > 0.15")
+                        logger.info(f"Probabilities low (max={max_prob:.4f}), falling back to raw cosine > 0.15")
                         probs = logits  # Treat raw cosine as score for ranking
                         threshold = 0.15 # Use raw threshold
+                    else:
+                        logger.info(f"All probabilities < 0.01 (max={max_prob:.4f}) and no raw logits > 0.15. "
+                                  f"Max raw logit: {np.max(logits):.4f}")
                 
                 # Log score statistics
                 if len(probs) > 0:
                     min_score = float(np.min(probs))
                     max_score = float(np.max(probs))
                     mean_score = float(np.mean(probs))
-                    logger.debug(f"Class probabilities: min={min_score:.3f}, max={max_score:.3f}, mean={mean_score:.3f}")
+                    logger.info(f"Class probabilities: min={min_score:.3f}, max={max_score:.3f}, mean={mean_score:.3f}, threshold={threshold:.3f}")
                 
                 results = []
                 for i, score in enumerate(probs):
@@ -434,6 +438,10 @@ class MetadataExtractor:
                         results.append((vocab_keys[i], float(score)))
                 
                 results.sort(key=lambda x: x[1], reverse=True)
+                
+                if not results:
+                    logger.info(f"No results passed threshold {threshold:.3f}. Top 3 scores: "
+                              f"{[(vocab_keys[i], float(probs[i])) for i in np.argsort(probs)[-3:][::-1]]}")
                 
                 return results[:top_k]
             
@@ -489,7 +497,7 @@ class MetadataExtractor:
             MOOD_VOCABULARY,
             self._mood_embeddings,
             top_k=top_k,
-            threshold=0.40,  # Standard probability threshold (will fallback if needed)
+            threshold=0.20,  # Lowered from 0.40 - sigmoid(0.15*108-16.35)=0.46, so 0.20 is reasonable
             method="multi_label"
         )
         
@@ -505,7 +513,7 @@ class MetadataExtractor:
             STYLE_VOCABULARY,
             self._style_embeddings,
             top_k=top_k,
-            threshold=0.40,  # Standard probability threshold (will fallback if needed)
+            threshold=0.20,  # Lowered from 0.40 - sigmoid(0.15*108-16.35)=0.46, so 0.20 is reasonable
             method="multi_label"
         )
         
@@ -752,26 +760,39 @@ class MetadataExtractor:
         
         # SigLIP-based classification (if embedding available)
         if siglip_embedding is not None:
+            logger.info(f"SigLIP embedding available: shape={siglip_embedding.shape}, "
+                       f"dtype={siglip_embedding.dtype}, norm={np.linalg.norm(siglip_embedding):.4f}")
             try:
                 metadata.primary_category, metadata.subcategories, metadata.category_confidence = \
                     self.classify_category(siglip_embedding)
+                logger.info(f"Category result: {metadata.primary_category} (conf={metadata.category_confidence:.3f})")
             except Exception as e:
                 logger.warning(f"Category classification failed: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
             
             try:
                 metadata.mood_tags = self.classify_mood(siglip_embedding)
+                logger.info(f"Mood result: {metadata.mood_tags}")
             except Exception as e:
                 logger.warning(f"Mood classification failed: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
             
             try:
                 metadata.style_tags = self.classify_style(siglip_embedding)
+                logger.info(f"Style result: {metadata.style_tags}")
             except Exception as e:
                 logger.warning(f"Style classification failed: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
             
             try:
                 metadata.composition_type = self.classify_composition(siglip_embedding)
             except Exception as e:
                 logger.warning(f"Composition classification failed: {e}")
+        else:
+            logger.warning("SigLIP embedding is None - skipping ML classification")
         
         # DINOv3 focal point (quality-based optimization)
         # Premium tier (6.5+): Use DINOv3 for best accuracy

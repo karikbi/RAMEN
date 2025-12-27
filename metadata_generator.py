@@ -547,6 +547,8 @@ class MetadataGenerator:
             
             # Use MetadataExtractor if available (preferred method)
             if self.metadata_extractor is not None and siglip_embedding is not None:
+                logger.debug(f"Calling MetadataExtractor.extract_all() with embedding shape: {siglip_embedding.shape}")
+                
                 # Extract all metadata using ML models (pass raw aesthetic for DINOv3 optimization)
                 raw_aesthetic = quality_score.raw_aesthetic if quality_score else 5.5
                 extracted = self.metadata_extractor.extract_all(
@@ -554,6 +556,10 @@ class MetadataGenerator:
                     siglip_embedding,
                     quality_score=raw_aesthetic  # V2.5 raw score (1-10) for tier-based optimization
                 )
+                
+                logger.debug(f"MetadataExtractor returned: category={extracted.primary_category}, "
+                           f"moods={extracted.mood_tags}, styles={extracted.style_tags}, "
+                           f"confidence={extracted.category_confidence}")
                 
                 # Use ML-extracted values
                 metadata.color_palette = extracted.color_palette
