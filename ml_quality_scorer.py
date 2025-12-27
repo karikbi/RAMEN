@@ -367,7 +367,7 @@ class MLQualityScorer:
             
             # Confidence based on score spread
             scores = [result.aesthetic_score, result.technical_score, result.wallpaper_score]
-            result.confidence = 1.0 - np.std(scores)
+            result.confidence = float(1.0 - np.std(scores))
             
             # Set quality tier based on raw aesthetic score
             result.quality_tier = get_quality_tier(result.raw_aesthetic)
@@ -467,11 +467,11 @@ class MLQualityScorer:
                 result.wallpaper_score * self.config.wallpaper_weight
             )
             
-            result.confidence = 1.0 - np.std([
+            result.confidence = float(1.0 - np.std([
                 result.aesthetic_score, 
                 result.technical_score, 
                 result.wallpaper_score
-            ])
+            ]))
             
             # Set quality tier
             result.quality_tier = get_quality_tier(result.raw_aesthetic)
@@ -578,11 +578,11 @@ class MLQualityScorer:
                 result.wallpaper_score * weights["wallpaper"]
             )
             
-            result.confidence = 1.0 - np.std([
+            result.confidence = float(1.0 - np.std([
                 result.aesthetic_score, 
                 result.technical_score, 
                 result.wallpaper_score
-            ])
+            ]))
             
             # Set quality tier
             result.quality_tier = get_quality_tier(result.raw_aesthetic)

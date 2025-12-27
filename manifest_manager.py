@@ -56,6 +56,28 @@ class ManifestManager:
         # Dedup index integration (optional)
         self.dedup_index: Optional["DuplicateIndex"] = None
     
+    def _to_native(self, value: Any) -> Any:
+        """
+        Convert numpy types to native Python types for JSON serialization.
+        
+        Handles: np.float32, np.float64, np.int32, np.int64, np.bool_, etc.
+        """
+        if isinstance(value, (np.floating, np.integer)):
+            return value.item()
+        elif isinstance(value, np.bool_):
+            return bool(value)
+        elif isinstance(value, np.ndarray):
+            return value.tolist()
+        return value
+    
+    def _safe_focal_point(self, focal_point: tuple) -> list:
+        """
+        Convert focal point tuple to a JSON-serializable list of floats.
+        
+        Handles numpy float types that may be in the tuple.
+        """
+        return [float(self._to_native(x)) for x in focal_point]
+    
     def set_r2_manager(self, r2_manager: "R2ManifestManager") -> None:
         """
         Enable R2 storage for manifests.
@@ -94,6 +116,10 @@ class ManifestManager:
         
         Returns:
             Dictionary representing manifest entry.
+        
+        Note:
+            All values are converted to native Python types via _to_native()
+            to ensure JSON serialization works correctly (no numpy float32 errors).
         """
         meta = wallpaper.metadata
         embeddings = wallpaper.embeddings
@@ -107,34 +133,34 @@ class ManifestManager:
             "primary_category": meta.primary_category,  # Explicit for validation
             "subcategories": meta.subcategories,
             
-            # Color analysis
+            # Color analysis - convert numpy types
             "colors": meta.color_palette,
-            "dominant_hue": meta.dominant_hue,
-            "color_diversity": round(meta.color_diversity, 3),  # NEW: was missing
-            "brightness": meta.brightness,
-            "contrast": meta.contrast_ratio,
-            "is_dark_mode_friendly": meta.is_dark_mode_friendly,  # NEW: was missing
+            "dominant_hue": self._to_native(meta.dominant_hue),
+            "color_diversity": round(float(self._to_native(meta.color_diversity)), 3),
+            "brightness": self._to_native(meta.brightness),
+            "contrast": round(float(self._to_native(meta.contrast_ratio)), 2),
+            "is_dark_mode_friendly": self._to_native(meta.is_dark_mode_friendly),
             
-            # Quality metrics
-            "quality_score": round(wallpaper.quality_scores.final_score, 4),
+            # Quality metrics - convert numpy types
+            "quality_score": round(float(self._to_native(wallpaper.quality_scores.final_score)), 4),
             "quality_tier": meta.quality_tier,
-            "aesthetic_score": round(meta.aesthetic_score, 2),  # NEW: V2.5 raw score (1-10)
+            "aesthetic_score": round(float(self._to_native(meta.aesthetic_score)), 2),
             
-            # ML classification metadata
-            "ml_category": meta.ml_category,  # NEW: explicit ML category
-            "ml_confidence": round(meta.ml_confidence, 3),  # NEW: classification confidence
+            # ML classification metadata - convert numpy types
+            "ml_category": meta.ml_category,
+            "ml_confidence": round(float(self._to_native(meta.ml_confidence)), 3),
             
             "dimensions": {
-                "width": meta.width,
-                "height": meta.height
+                "width": self._to_native(meta.width),
+                "height": self._to_native(meta.height)
             },
-            "aspect_ratio": round(meta.aspect_ratio, 2),
-            "file_size": meta.file_size,
+            "aspect_ratio": round(float(self._to_native(meta.aspect_ratio)), 2),
+            "file_size": self._to_native(meta.file_size),
             "date_added": datetime.now().isoformat() + "Z",
             "source": wallpaper.source,
             "source_metadata": {
                 "subreddit": meta.subreddit,
-                "upvotes": meta.upvotes,
+                "upvotes": self._to_native(meta.upvotes),
                 "post_url": meta.post_url,
                 "source_url": meta.source_url,
             },
@@ -149,15 +175,15 @@ class ManifestManager:
             },
             "composition": {
                 "type": meta.composition_type,
-                "symmetry": round(meta.symmetry_score, 2),
-                "depth": round(meta.depth_score, 2),
+                "symmetry": round(float(self._to_native(meta.symmetry_score)), 2),
+                "depth": round(float(self._to_native(meta.depth_score)), 2),
                 "complexity": meta.complexity_level,
-                "focal_point": meta.focal_point,
-                "focal_point_method": meta.focal_point_method,  # NEW: was missing
+                "focal_point": self._safe_focal_point(meta.focal_point),
+                "focal_point_method": meta.focal_point_method,
             },
             "mood_tags": meta.mood_tags,
             "style_tags": meta.style_tags,
-            "metadata_version": "1.1"  # Bumped version for new fields
+            "metadata_version": "1.1"  # Version for new fields
         }
     
     def load_collection(self) -> list[dict]:

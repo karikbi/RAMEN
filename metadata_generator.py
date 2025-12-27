@@ -400,7 +400,7 @@ class MetadataGenerator:
         # Depth score (variance in edge density across horizontal bands)
         bands = [edges[:h//3, :], edges[h//3:2*h//3, :], edges[2*h//3:, :]]
         densities = [b.mean() for b in bands]
-        depth = np.std(densities) / 50
+        depth = float(np.std(densities)) / 50
         
         return comp_type, symmetry, min(depth, 1.0)
     

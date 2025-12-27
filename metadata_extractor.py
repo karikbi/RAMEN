@@ -272,6 +272,16 @@ class MetadataExtractor:
                     results.append((vocab_keys[i], float(score)))
             
             results.sort(key=lambda x: x[1], reverse=True)
+            
+            # Debug: Log top 3 scores if no results pass threshold
+            if not results and len(similarities) > 0:
+                top_indices = np.argsort(similarities)[-3:][::-1]
+                top_items = [(vocab_keys[i], float(similarities[i])) for i in top_indices]
+                logger.debug(
+                    f"No items passed threshold {threshold:.2f}. "
+                    f"Top 3 scores: {top_items}"
+                )
+            
             return results[:top_k]
             
         except Exception as e:
@@ -300,10 +310,11 @@ class MetadataExtractor:
             CATEGORY_VOCABULARY,
             self._category_embeddings,
             top_k=top_k,
-            threshold=0.20
+            threshold=0.15  # Lowered from 0.20 - SigLIP similarities are lower than CLIP
         )
         
         if not results:
+            logger.debug("Category classification returned empty (below threshold 0.15)")
             return "general", [], 0.0
         
         primary = results[0][0]
@@ -322,7 +333,7 @@ class MetadataExtractor:
             MOOD_VOCABULARY,
             self._mood_embeddings,
             top_k=top_k,
-            threshold=0.22
+            threshold=0.18  # Lowered from 0.22 - SigLIP similarities are lower than CLIP
         )
         
         return [r[0] for r in results]
@@ -337,7 +348,7 @@ class MetadataExtractor:
             STYLE_VOCABULARY,
             self._style_embeddings,
             top_k=top_k,
-            threshold=0.22
+            threshold=0.18  # Lowered from 0.22 - SigLIP similarities are lower than CLIP
         )
         
         return [r[0] for r in results]
