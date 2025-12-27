@@ -253,9 +253,13 @@ class MetadataExtractor:
     ) -> List[Tuple[str, float]]:
         """Classify image against a vocabulary using cosine similarity."""
         if precomputed_embeddings is None:
+            logger.debug("Classification skipped: precomputed_embeddings is None")
             return []
         
         try:
+            # Ensure consistent dtype for dot product (text embeddings are float32)
+            image_embedding = image_embedding.astype(np.float32)
+            
             # Compute cosine similarities
             similarities = np.dot(precomputed_embeddings, image_embedding)
             
@@ -271,7 +275,10 @@ class MetadataExtractor:
             return results[:top_k]
             
         except Exception as e:
-            logger.warning(f"Classification failed: {e}")
+            logger.warning(
+                f"Classification failed: {e}, "
+                f"embedding shape: {image_embedding.shape}, dtype: {image_embedding.dtype}"
+            )
             return []
     
     def classify_category(

@@ -106,12 +106,24 @@ class ManifestManager:
             "category": meta.primary_category,
             "primary_category": meta.primary_category,  # Explicit for validation
             "subcategories": meta.subcategories,
+            
+            # Color analysis
             "colors": meta.color_palette,
             "dominant_hue": meta.dominant_hue,
+            "color_diversity": round(meta.color_diversity, 3),  # NEW: was missing
             "brightness": meta.brightness,
             "contrast": meta.contrast_ratio,
+            "is_dark_mode_friendly": meta.is_dark_mode_friendly,  # NEW: was missing
+            
+            # Quality metrics
             "quality_score": round(wallpaper.quality_scores.final_score, 4),
             "quality_tier": meta.quality_tier,
+            "aesthetic_score": round(meta.aesthetic_score, 2),  # NEW: V2.5 raw score (1-10)
+            
+            # ML classification metadata
+            "ml_category": meta.ml_category,  # NEW: explicit ML category
+            "ml_confidence": round(meta.ml_confidence, 3),  # NEW: classification confidence
+            
             "dimensions": {
                 "width": meta.width,
                 "height": meta.height
@@ -141,10 +153,11 @@ class ManifestManager:
                 "depth": round(meta.depth_score, 2),
                 "complexity": meta.complexity_level,
                 "focal_point": meta.focal_point,
+                "focal_point_method": meta.focal_point_method,  # NEW: was missing
             },
             "mood_tags": meta.mood_tags,
             "style_tags": meta.style_tags,
-            "metadata_version": "1.0"
+            "metadata_version": "1.1"  # Bumped version for new fields
         }
     
     def load_collection(self) -> list[dict]:

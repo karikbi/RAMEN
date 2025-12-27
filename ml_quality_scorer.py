@@ -443,7 +443,8 @@ class MLQualityScorer:
                     image_features = F.normalize(image_features, dim=-1)
                     
                     # Save embedding
-                    embedding = image_features.cpu().numpy()[0].astype(np.float16)
+                    # Use float32 to match text embeddings in MetadataExtractor
+                    embedding = image_features.cpu().numpy()[0].astype(np.float32)
                 
                 result.technical_score, _, _ = self._compute_siglip_similarity(
                     image_features,
@@ -552,7 +553,8 @@ class MLQualityScorer:
                 with torch.no_grad():
                     image_features = self._siglip_model.get_image_features(**image_inputs)
                     image_features = F.normalize(image_features, dim=-1)
-                    embedding = image_features.cpu().numpy()[0].astype(np.float16)
+                    # Use float32 to match text embeddings in MetadataExtractor
+                    embedding = image_features.cpu().numpy()[0].astype(np.float32)
                 
                 result.technical_score, _, _ = self._compute_siglip_similarity(
                     image_features,

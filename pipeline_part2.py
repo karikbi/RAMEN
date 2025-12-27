@@ -153,22 +153,27 @@ class FilteringPipeline:
             logger.info("Initialized ML-based category classifier")
         
         # Initialize MetadataExtractor (uses already-loaded models)
+        # MetadataExtractor needs SigLIP for category/mood/style classification
+        # DINOv3 is optional (used only for focal point detection)
         self.metadata_extractor = None
         if self.ml_quality_scorer._ensure_siglip_loaded():
-            # Load DINOv3 for focal point detection
+            # Try to load DINOv3 for focal point detection (optional)
             dinov3_model, dinov3_processor = self.embedding_extractor._load_dinov3()
             
-            if dinov3_model is not None and dinov3_processor is not None:
-                self.metadata_extractor = MetadataExtractor(
-                    siglip_model=self.ml_quality_scorer._siglip_model,
-                    siglip_processor=self.ml_quality_scorer._siglip_processor,
-                    dinov3_model=dinov3_model,
-                    dinov3_processor=dinov3_processor,
-                    device=self.embedding_extractor.device
-                )
+            # Always create MetadataExtractor if SigLIP is available
+            # DINOv3 is optional - will fallback to gradient method for focal points
+            self.metadata_extractor = MetadataExtractor(
+                siglip_model=self.ml_quality_scorer._siglip_model,
+                siglip_processor=self.ml_quality_scorer._siglip_processor,
+                dinov3_model=dinov3_model,  # Can be None - will use gradient fallback
+                dinov3_processor=dinov3_processor,
+                device=self.embedding_extractor.device
+            )
+            
+            if dinov3_model is not None:
                 logger.info("Initialized MetadataExtractor with SigLIP + DINOv3")
             else:
-                logger.warning("DINOv3 not available - MetadataExtractor will use gradient fallback for focal points")
+                logger.info("Initialized MetadataExtractor with SigLIP (gradient fallback for focal points)")
         
         self.metadata_generator = MetadataGenerator(
             category_classifier=self.category_classifier,
