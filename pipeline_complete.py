@@ -157,7 +157,7 @@ class WallpaperCurationPipeline:
         # Deduplication system
         self.dedup_index: Optional[DuplicateIndex] = None
         self.dedup_checker: Optional[DuplicateChecker] = None
-        self.dedup_sync: Optional[R2DedupSync] = None
+        self.dedup_sync: Optional[DedupSync] = None
         
         # R2 manifest storage
         self.r2_manifest_manager: Optional[R2ManifestManager] = None

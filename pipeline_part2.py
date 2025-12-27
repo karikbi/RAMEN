@@ -252,13 +252,15 @@ class FilteringPipeline:
         self.stats.passed_quality_scoring += 1
         
         # Step 4: Extract Remaining Embeddings (ONLY FOR APPROVED IMAGES)
-        # SigLIP already extracted, now get MobileNet, EfficientNet, DINOv2
+        # SigLIP already extracted, now get MobileNet, EfficientNet, DINOv3
         logger.info(f"Approved {candidate.id} (score={ml_score.final_score:.3f}) - extracting embeddings")
         embeddings = EmbeddingSet()
         embeddings.siglip = siglip_embedding
         embeddings.mobilenet_v4 = self.embedding_extractor.extract_mobilenet_v4(candidate.filepath)
         embeddings.efficientnet_v2 = self.embedding_extractor.extract_efficientnet(candidate.filepath)
-        embeddings.dinov2 = self.embedding_extractor.extract_dinov2(candidate.filepath)
+        embeddings.dinov3 = self.embedding_extractor.extract_dinov3(candidate.filepath)
+        embeddings.dinov2 = embeddings.dinov3  # Legacy alias
+
 
         
         # Step 5: Generate Metadata with ML classification

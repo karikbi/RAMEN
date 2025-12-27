@@ -183,8 +183,9 @@ class EmbeddingExtractor:
                 import timm
                 import torch
                 
+                model_name = 'mobilenetv4_conv_small.e2400_r224_in1k'
                 self._mobilenet_v4 = timm.create_model(
-                    'mobilenetv4_conv_small.e2400_r224_in1k',
+                    model_name,
                     pretrained=True,
                     num_classes=0  # Remove classifier for embeddings
                 )
@@ -248,6 +249,7 @@ class EmbeddingExtractor:
                         f"Model: {model_name}. This requires manual investigation."
                     )
             except Exception as e:
+                logger.error(f"Failed to load MobileNetV4: {e}")
         return self._mobilenet_v4, self._mobilenet_v4_projection_960, getattr(self, '_mobilenet_v4_actual_dim', 1280)
     
     def extract_mobilenet_v4(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
