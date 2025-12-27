@@ -88,6 +88,24 @@ class Config:
     unsplash_count: int = 100  # Increased from 30
     pexels_count: int = 80     # Increased from 20
     
+    # Wallpaper-friendly search queries (read from config.yaml)
+    unsplash_search_query: str = field(default_factory=lambda:
+        get_central_config().get('sources.unsplash.search_query', 
+                                 'landscape nature scenery abstract mountains ocean sky') 
+        if HAS_CONFIG_LOADER else 'landscape nature scenery abstract mountains ocean sky'
+    )
+    pexels_search_query: str = field(default_factory=lambda:
+        get_central_config().get('sources.pexels.search_query',
+                                 'landscape nature scenery abstract mountains ocean sky')
+        if HAS_CONFIG_LOADER else 'landscape nature scenery abstract mountains ocean sky'
+    )
+    
+    # Image orientation filter (landscape/portrait/squarish)
+    image_orientation: str = field(default_factory=lambda:
+        get_central_config().get('sources.unsplash.orientation', 'landscape')
+        if HAS_CONFIG_LOADER else 'landscape'
+    )
+    
     # Directories
     temp_dir: Path = field(default_factory=lambda: Path("./temp"))
     candidates_dir: Path = field(default_factory=lambda: Path("./temp/candidates"))
@@ -632,32 +650,35 @@ class UnsplashFetcher:
         dedup_checker: Optional["DuplicateChecker"] = None
     ) -> list[dict[str, Any]]:
         """
-        Fetch photos from Unsplash curated/editorial collections with pagination.
+        Fetch wallpaper-friendly photos from Unsplash using search endpoint.
+        Uses landscape orientation and nature/scenery queries to avoid portraits.
         """
         photos = []
         
-        # Fetch from curated photos endpoint (editorial picks)
+        # Use search endpoint with wallpaper-friendly queries
         try:
             # We will iterate until we hit the count or run out of pages
             page = 1
             max_pages = 10
             
             while len(photos) < self.config.unsplash_count and page <= max_pages:
-                editorial_url = f"{self.BASE_URL}/photos"
+                search_url = f"{self.BASE_URL}/search/photos"
                 params = {
+                    "query": self.config.unsplash_search_query,
                     "per_page": 30,  # Fetch a batch
-                    "order_by": "popular",
+                    "orientation": self.config.image_orientation,  # landscape/portrait/squarish
                     "page": page
                 }
                 
-                logger.info(f"Fetching Unsplash page {page}...")
+                logger.info(f"Fetching Unsplash page {page} (query: '{self.config.unsplash_search_query}', orientation: {self.config.image_orientation})...")
                 
-                async with session.get(editorial_url, headers=self.headers, params=params) as response:
+                async with session.get(search_url, headers=self.headers, params=params) as response:
                     if response.status != 200:
                         logger.warning(f"Failed to fetch Unsplash photos: {response.status}")
                         break
                         
-                    batch = await response.json()
+                    data = await response.json()
+                    batch = data.get("results", [])  # Search results are under "results" key
                     if not batch:
                         break
                     
@@ -684,7 +705,7 @@ class UnsplashFetcher:
         except Exception as e:
             logger.error(f"Error fetching from Unsplash: {e}")
         
-        logger.info(f"Fetched {len(photos)} photos from Unsplash")
+        logger.info(f"Fetched {len(photos)} wallpaper-friendly photos from Unsplash")
         return photos[:self.config.unsplash_count]
     
     def _parse_photo(self, photo: dict[str, Any]) -> dict[str, Any]:
@@ -728,7 +749,8 @@ class PexelsFetcher:
         dedup_checker: Optional["DuplicateChecker"] = None
     ) -> list[dict[str, Any]]:
         """
-        Fetch photos from Pexels curated endpoint with pagination.
+        Fetch wallpaper-friendly photos from Pexels using search endpoint.
+        Uses landscape orientation and nature/scenery queries to avoid portraits.
         """
         photos = []
         page = 1
@@ -736,15 +758,17 @@ class PexelsFetcher:
         
         try:
             while len(photos) < self.config.pexels_count and page <= max_pages:
-                curated_url = f"{self.BASE_URL}/curated"
+                search_url = f"{self.BASE_URL}/search"
                 params = {
+                    "query": self.config.pexels_search_query,
                     "per_page": 40,
+                    "orientation": self.config.image_orientation,  # landscape/portrait/square
                     "page": page
                 }
                 
-                logger.info(f"Fetching Pexels page {page}...")
+                logger.info(f"Fetching Pexels page {page} (query: '{self.config.pexels_search_query}', orientation: {self.config.image_orientation})...")
                 
-                async with session.get(curated_url, headers=self.headers, params=params) as response:
+                async with session.get(search_url, headers=self.headers, params=params) as response:
                     if response.status != 200:
                         logger.warning(f"Failed to fetch from Pexels: {response.status}")
                         break
@@ -776,7 +800,7 @@ class PexelsFetcher:
         except Exception as e:
             logger.error(f"Error fetching from Pexels: {e}")
         
-        logger.info(f"Fetched {len(photos)} photos from Pexels")
+        logger.info(f"Fetched {len(photos)} wallpaper-friendly photos from Pexels")
         return photos
     
     def _parse_photo(self, photo: dict[str, Any]) -> dict[str, Any]:

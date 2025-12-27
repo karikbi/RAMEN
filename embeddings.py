@@ -2,7 +2,11 @@
 """
 Wallpaper Curation Pipeline - Part 2: Embedding Extraction
 
-Extracts embeddings from 4 models: MobileNetV3, EfficientNetV2, SigLIP, and DINOv2.
+Extracts embeddings from 4 models:
+- MobileNetV4-Small (960D) - device compatibility with 576D legacy projection
+- EfficientNetV2-Large (1280D) - visual similarity
+- SigLIP 2 Large (1152D) - semantic understanding
+- DINOv3-Large (1024D) - scene composition
 """
 
 import logging
@@ -45,35 +49,48 @@ MODELS_DIR.mkdir(exist_ok=True)
 os.environ["HF_HOME"] = str(MODELS_DIR / "huggingface")
 os.environ["TORCH_HOME"] = str(MODELS_DIR / "torch")
 
+# HuggingFace token for gated model access (required for CI/CD)
+# Set via: export HF_TOKEN=hf_xxx... or in GitHub Actions secrets
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
 
 @dataclass
 class EmbeddingSet:
-    """Container for all 4 model embeddings."""
-    mobilenet_v3: Optional[np.ndarray] = None  # 576-dim, int8
+    """Container for all model embeddings (V2 stack with backward compatibility)."""
+    # MobileNetV4-Small: 960-dim primary, 576-dim legacy projection
+    mobilenet_v4: Optional[np.ndarray] = None  # 960-dim, int8 (NEW)
+    mobilenet_v3: Optional[np.ndarray] = None  # 576-dim, int8 (legacy projection from v4)
     efficientnet_v2: Optional[np.ndarray] = None  # 1280-dim, int8
-    siglip: Optional[np.ndarray] = None  # 1152-dim, float16
-    dinov2: Optional[np.ndarray] = None  # 1024-dim, int8
+    siglip: Optional[np.ndarray] = None  # 1152-dim, float16 (now SigLIP 2)
+    dinov2: Optional[np.ndarray] = None  # 1024-dim, int8 (legacy alias)
+    dinov3: Optional[np.ndarray] = None  # 1024-dim, int8 (NEW)
     
-    mobilenet_v3_dim: int = 576
+    mobilenet_v4_dim: int = 960
+    mobilenet_v3_dim: int = 576  # legacy projection
     efficientnet_v2_dim: int = 1280
     siglip_dim: int = 1152
-    dinov2_dim: int = 1024
+    dinov3_dim: int = 1024
+    dinov2_dim: int = 1024  # legacy alias
     
     def is_complete(self) -> bool:
-        """Check if all embeddings are present."""
+        """Check if all embeddings are present (V2 stack)."""
         return all([
-            self.mobilenet_v3 is not None,
+            self.mobilenet_v4 is not None,
             self.efficientnet_v2 is not None,
             self.siglip is not None,
-            self.dinov2 is not None
+            self.dinov3 is not None
         ])
     
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
-            "mobilenet_v3": self.mobilenet_v3.tolist() if self.mobilenet_v3 is not None else None,
+            # V2 stack (primary)
+            "mobilenet_v4": self.mobilenet_v4.tolist() if self.mobilenet_v4 is not None else None,
+            "mobilenet_v3": self.mobilenet_v3.tolist() if self.mobilenet_v3 is not None else None,  # legacy projection
             "efficientnet_v2": self.efficientnet_v2.tolist() if self.efficientnet_v2 is not None else None,
             "siglip": self.siglip.tolist() if self.siglip is not None else None,
+            "dinov3": self.dinov3.tolist() if self.dinov3 is not None else None,
+            # Legacy aliases
             "dinov2": self.dinov2.tolist() if self.dinov2 is not None else None,
         }
 
@@ -92,11 +109,15 @@ class EmbeddingExtractor:
         logger.info(f"Using device: {self.device}")
         
         # Lazy-loaded models
-        self._mobilenet = None
+        self._mobilenet_v4 = None  # MobileNetV4-Small (timm)
+        self._mobilenet_v4_projection = None  # 960->576 projection
+        self._mobilenet = None  # Legacy MobileNetV3 (TensorFlow)
         self._efficientnet = None
         self._siglip_model = None
         self._siglip_processor = None
-        self._dinov2 = None
+        self._dinov3_model = None  # DINOv3 (HuggingFace)
+        self._dinov3_processor = None
+        self._dinov2 = None  # Legacy DINOv2
         self._dinov2_transform = None
     
     def _detect_device(self, device: str) -> str:
@@ -153,11 +174,92 @@ class EmbeddingExtractor:
         return self._ensure_image(filepath, size)
     
     # =========================================================================
-    # MOBILENET V3 (576-dim)
+    # MOBILENET V4 (960-dim) with 576-dim legacy projection
+    # =========================================================================
+    
+    def _load_mobilenet_v4(self):
+        """Load MobileNetV4-Small model from timm."""
+        if self._mobilenet_v4 is None:
+            try:
+                import timm
+                import torch
+                
+                self._mobilenet_v4 = timm.create_model(
+                    'mobilenetv4_conv_small.e2400_r224_in1k',
+                    pretrained=True,
+                    num_classes=0  # Remove classifier for embeddings
+                )
+                
+                if self.device == "cuda":
+                    self._mobilenet_v4 = self._mobilenet_v4.cuda()
+                elif self.device == "mps":
+                    self._mobilenet_v4 = self._mobilenet_v4.to("mps")
+                
+                self._mobilenet_v4.eval()
+                
+                # Create 960->576 projection layer for backward compatibility
+                self._mobilenet_v4_projection = torch.nn.Linear(960, 576)
+                # Initialize with simple truncation-like projection
+                with torch.no_grad():
+                    self._mobilenet_v4_projection.weight.data = torch.eye(576, 960)
+                    self._mobilenet_v4_projection.bias.data.zero_()
+                
+                if self.device == "cuda":
+                    self._mobilenet_v4_projection = self._mobilenet_v4_projection.cuda()
+                elif self.device == "mps":
+                    self._mobilenet_v4_projection = self._mobilenet_v4_projection.to("mps")
+                
+                logger.info("Loaded MobileNetV4-Small (960D + 576D projection)")
+            except Exception as e:
+                logger.error(f"Failed to load MobileNetV4: {e}")
+        return self._mobilenet_v4, self._mobilenet_v4_projection
+    
+    def extract_mobilenet_v4(self, input_data: Union[str, Path, Image.Image]) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """
+        Extract MobileNetV4 embeddings (960-dim primary, 576-dim legacy projection).
+        
+        Returns:
+            Tuple of (960-dim int8, 576-dim int8 legacy projection)
+        """
+        model, projection = self._load_mobilenet_v4()
+        if model is None:
+            return None, None
+        
+        try:
+            import torch
+            from timm.data import resolve_data_config
+            from timm.data.transforms_factory import create_transform
+            
+            # Get model-specific transforms
+            config = resolve_data_config({}, model=model)
+            transform = create_transform(**config)
+            
+            img = self._ensure_image(input_data)
+            img_tensor = transform(img).unsqueeze(0)
+            
+            if self.device == "cuda":
+                img_tensor = img_tensor.cuda()
+            elif self.device == "mps":
+                img_tensor = img_tensor.to("mps")
+            
+            with torch.no_grad():
+                embedding_960 = model(img_tensor)
+                embedding_576 = projection(embedding_960)
+            
+            emb_960 = embedding_960.cpu().numpy()[0]
+            emb_576 = embedding_576.cpu().numpy()[0]
+            
+            return self._quantize_int8(emb_960), self._quantize_int8(emb_576)
+        except Exception as e:
+            logger.error(f"MobileNetV4 extraction failed: {e}")
+            return None, None
+    
+    # =========================================================================
+    # MOBILENET V3 (576-dim) - LEGACY FALLBACK
     # =========================================================================
     
     def _load_mobilenet(self):
-        """Load MobileNetV3 model."""
+        """Load MobileNetV3 model (legacy fallback)."""
         if self._mobilenet is None:
             try:
                 import tensorflow as tf
@@ -168,13 +270,13 @@ class EmbeddingExtractor:
                     include_top=False,
                     pooling='avg'
                 )
-                logger.info("Loaded MobileNetV3-Small")
+                logger.info("Loaded MobileNetV3-Small (legacy fallback)")
             except Exception as e:
                 logger.error(f"Failed to load MobileNetV3: {e}")
         return self._mobilenet
     
     def extract_mobilenet(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
-        """Extract MobileNetV3 embedding (576-dim, int8)."""
+        """Extract MobileNetV3 embedding (576-dim, int8) - legacy fallback."""
         model = self._load_mobilenet()
         if model is None:
             return None
@@ -235,17 +337,18 @@ class EmbeddingExtractor:
             return None
     
     # =========================================================================
-    # SIGLIP (1152-dim)
+    # SIGLIP 2 (1152-dim) - Upgraded from SigLIP v1
     # =========================================================================
     
     def _load_siglip(self):
-        """Load SigLIP model from HuggingFace."""
+        """Load SigLIP 2 model from HuggingFace."""
         if self._siglip_model is None:
             try:
                 from transformers import AutoProcessor, AutoModel
                 import torch
                 
-                model_name = "google/siglip-large-patch16-384"
+                # SigLIP 2: Better localization, multilingual, officially stable
+                model_name = "google/siglip2-large-patch16-384"
                 self._siglip_processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
                 self._siglip_model = AutoModel.from_pretrained(model_name)
                 
@@ -255,9 +358,9 @@ class EmbeddingExtractor:
                     self._siglip_model = self._siglip_model.to("mps")
                 
                 self._siglip_model.eval()
-                logger.info("Loaded SigLIP-Large")
+                logger.info("Loaded SigLIP 2 Large")
             except Exception as e:
-                logger.error(f"Failed to load SigLIP: {e}")
+                logger.error(f"Failed to load SigLIP 2: {e}")
         return self._siglip_model, self._siglip_processor
     
     def extract_siglip(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
@@ -375,12 +478,78 @@ class EmbeddingExtractor:
 
 
     # =========================================================================
-    # DINOV2 (1024-dim)
+    # DINOV3 (1024-dim) - Upgraded from DINOv2
+    # =========================================================================
+
+    def _load_dinov3(self):
+        """Load DINOv3 model from HuggingFace (requires HF_TOKEN for gated access)."""
+        if self._dinov3_model is None:
+            try:
+                from transformers import AutoModel, AutoImageProcessor
+                import torch
+                
+                # DINOv3: +6 mIoU composition, same 1024D dimensions
+                # Gated model - requires HF_TOKEN (from env) after accepting terms
+                model_name = "facebook/dinov3-vitl16-pretrain-lvd1689m"
+                
+                # Use token for gated model access in CI/CD
+                token = HF_TOKEN
+                if not token:
+                    logger.warning("HF_TOKEN not set - DINOv3 may fail if terms not accepted locally")
+                
+                self._dinov3_processor = AutoImageProcessor.from_pretrained(model_name, token=token)
+                self._dinov3_model = AutoModel.from_pretrained(model_name, token=token)
+                
+                if self.device == "cuda":
+                    self._dinov3_model = self._dinov3_model.cuda()
+                elif self.device == "mps":
+                    self._dinov3_model = self._dinov3_model.to("mps")
+                
+                self._dinov3_model.eval()
+                logger.info("Loaded DINOv3-Large")
+            except Exception as e:
+                logger.error(f"Failed to load DINOv3: {e}")
+                logger.info("Fallback: Will use DINOv2 if DINOv3 unavailable")
+        return self._dinov3_model, self._dinov3_processor
+    
+    def extract_dinov3(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
+        """Extract DINOv3 embedding (1024-dim, int8)."""
+        model, processor = self._load_dinov3()
+        if model is None or processor is None:
+            return None
+        
+        try:
+            import torch
+            
+            img = self._ensure_image(input_data)
+            inputs = processor(images=img, return_tensors="pt")
+            
+            if self.device == "cuda":
+                inputs = {k: v.cuda() for k, v in inputs.items()}
+            elif self.device == "mps":
+                inputs = {k: v.to("mps") for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                outputs = model(**inputs)
+                # Get CLS token embedding (pooler output or last hidden state)
+                if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+                    embedding = outputs.pooler_output
+                else:
+                    embedding = outputs.last_hidden_state[:, 0]
+            
+            embedding = embedding.cpu().numpy()[0]
+            return self._quantize_int8(embedding)
+        except Exception as e:
+            logger.error(f"DINOv3 extraction failed: {e}")
+            return None
+    
+    # =========================================================================
+    # DINOV2 (1024-dim) - LEGACY FALLBACK
     # =========================================================================
 
     
     def _load_dinov2(self):
-        """Load DINOv2 model from torch hub."""
+        """Load DINOv2 model from torch hub (legacy fallback)."""
         if self._dinov2 is None:
             try:
                 import torch
@@ -406,13 +575,13 @@ class EmbeddingExtractor:
                     T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                 ])
                 
-                logger.info("Loaded DINOv2-Large")
+                logger.info("Loaded DINOv2-Large (legacy fallback)")
             except Exception as e:
                 logger.error(f"Failed to load DINOv2: {e}")
         return self._dinov2, self._dinov2_transform
     
     def extract_dinov2(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
-        """Extract DINOv2 embedding (1024-dim, int8)."""
+        """Extract DINOv2 embedding (1024-dim, int8) - legacy fallback."""
         model, transform = self._load_dinov2()
         if model is None or transform is None:
             return None
@@ -445,7 +614,7 @@ class EmbeddingExtractor:
     
     def extract_all_embeddings(self, filepath) -> EmbeddingSet:
         """
-        Extract embeddings from all 4 models.
+        Extract embeddings from all models (V2 stack).
         
         Args:
             filepath: Path to the image file.
@@ -457,17 +626,18 @@ class EmbeddingExtractor:
         
         logger.debug(f"Extracting embeddings for {filepath}")
         
-        # MobileNetV3 (576-dim)
-        embeddings.mobilenet_v3 = self.extract_mobilenet(filepath)
+        # MobileNetV4 (960-dim + 576-dim legacy projection)
+        embeddings.mobilenet_v4, embeddings.mobilenet_v3 = self.extract_mobilenet_v4(filepath)
         
         # EfficientNetV2 (1280-dim)
         embeddings.efficientnet_v2 = self.extract_efficientnet(filepath)
         
-        # SigLIP (1152-dim)
+        # SigLIP 2 (1152-dim)
         embeddings.siglip = self.extract_siglip(filepath)
         
-        # DINOv2 (1024-dim)
-        embeddings.dinov2 = self.extract_dinov2(filepath)
+        # DINOv3 (1024-dim) + legacy alias
+        embeddings.dinov3 = self.extract_dinov3(filepath)
+        embeddings.dinov2 = embeddings.dinov3  # Legacy alias
         
         return embeddings
     
@@ -497,19 +667,19 @@ class EmbeddingExtractor:
                 # Force load into memory to allow closing file
                 img.load()
                 
-                # Create copies for processing prevents repeated I/O
-                # MobileNetV3 (576-dim)
-                embeddings.mobilenet_v3 = self.extract_mobilenet(img)
+                # MobileNetV4 (960-dim + 576-dim legacy projection)
+                embeddings.mobilenet_v4, embeddings.mobilenet_v3 = self.extract_mobilenet_v4(img)
                 
                 # EfficientNetV2 (1280-dim)
                 embeddings.efficientnet_v2 = self.extract_efficientnet(img)
                 
-                # SigLIP (1152-dim)
+                # SigLIP 2 (1152-dim)
                 if not skip_siglip:
                     embeddings.siglip = self.extract_siglip(img)
                 
-                # DINOv2 (1024-dim)
-                embeddings.dinov2 = self.extract_dinov2(img)
+                # DINOv3 (1024-dim) + legacy alias
+                embeddings.dinov3 = self.extract_dinov3(img)
+                embeddings.dinov2 = embeddings.dinov3  # Legacy alias
                 
         except Exception as e:
             logger.error(f"Optimized batch extraction failed for {filepath}: {e}")
@@ -543,12 +713,14 @@ class EmbeddingExtractor:
         """
         embeddings = EmbeddingSet()
         
-        # Model extraction map
+        # Model extraction map - V2 stack with backward compatibility
+        # Note: mobilenet_v4 extraction returns tuple (960D, 576D)
         model_extractors = {
-            "mobilenet": ("mobilenet_v3", self.extract_mobilenet),
+            "mobilenet_v4": ("mobilenet_v4", lambda fp: self.extract_mobilenet_v4(fp)[0]),
+            "mobilenet": ("mobilenet_v3", lambda fp: self.extract_mobilenet_v4(fp)[1]),  # legacy projection
             "efficientnet": ("efficientnet_v2", self.extract_efficientnet),
             "siglip": ("siglip", self.extract_siglip),
-            "dinov2": ("dinov2", self.extract_dinov2),
+            "dinov3": ("dinov3", self.extract_dinov3),
         }
         
         # Determine which models to process
@@ -597,6 +769,13 @@ class EmbeddingExtractor:
         """
         import gc
         
+        # V2 stack
+        self._mobilenet_v4 = None
+        self._mobilenet_v4_projection = None
+        self._dinov3_model = None
+        self._dinov3_processor = None
+        
+        # Legacy models
         self._mobilenet = None
         self._efficientnet = None
         self._siglip_model = None

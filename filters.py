@@ -107,24 +107,19 @@ class HardFilters:
     def check_resolution(self, img: Image.Image) -> Tuple[bool, str]:
         """Check minimum resolution requirements.
         
-        Accepts both:
-        - Landscape: 1920x1080 or larger
-        - Portrait: 1080x1920 or larger (for mobile phones)
+        Only accepts landscape orientation (width >= height):
+        - Minimum: 1920x1080 (Full HD)
+        - Portrait images are rejected to prevent them from dominating
         """
         width, height = img.size
         
-        # Calculate total pixels for equivalent size check
-        min_pixels = self.config.min_width * self.config.min_height  # 1920*1080 = 2,073,600
-        actual_pixels = width * height
+        # Enforce landscape orientation only
+        if width < height:
+            return False, f"Portrait orientation not allowed: {width}x{height} (landscape only)"
         
-        # Check if image meets minimum pixel count (allows both orientations)
-        if actual_pixels < min_pixels:
-            return False, f"Resolution too low: {width}x{height} ({actual_pixels:,} pixels, min: {min_pixels:,} pixels)"
-        
-        # Also ensure minimum dimension is at least 1080 (for quality)
-        min_dimension = min(self.config.min_width, self.config.min_height)  # 1080
-        if min(width, height) < min_dimension:
-            return False, f"Resolution too low: {width}x{height} (smallest side must be at least {min_dimension}px)"
+        # Check minimum dimensions
+        if width < self.config.min_width or height < self.config.min_height:
+            return False, f"Resolution too low: {width}x{height} (min: {self.config.min_width}x{self.config.min_height})"
         
         return True, ""
     

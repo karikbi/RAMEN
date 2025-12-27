@@ -11,7 +11,7 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 
 **Automated curation**: GitHub Actions runs daily at 2 AM IST, zero manual work except weekly reviews
 
-**Four embedding models**: Capture visual similarity (EfficientNetV2), semantic understanding (SigLIP), composition (DINOv2), and device compatibility (MobileNetV3)
+**Four embedding models** (V2 stack): Capture visual similarity (EfficientNetV2), semantic understanding (SigLIP 2), composition (DINOv3), and device compatibility (MobileNetV4)
 
 **Premium metadata**: 20+ fields per wallpaper including colors, categories, scene analysis, composition metrics, artist attribution
 
@@ -19,29 +19,29 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 
 ***
 
-## The 4-Model System
+## The 4-Model System (V2 Stack)
 
-**MobileNetV3-Small** (576 dimensions)
+**MobileNetV4-Small** (960 dimensions, with 576D legacy projection)
 - Bridge between user uploads and better models
 - Enables Personalize Mode in Vanderwaals
-- Runs on-device (15ms)
+- 2× faster, +7% accuracy vs MobileNetV3
 
 **EfficientNetV2-Large** (1,280 dimensions)
 - Best visual similarity and aesthetic quality
 - Primary recommendation engine
 - Captures artistic style, lighting, composition
 
-**SigLIP-Large** (1,152 dimensions)
+**SigLIP 2 Large** (1,152 dimensions)
 - Semantic understanding and concepts
 - Auto-categorization and tagging
-- Future text search capability
+- Better localization, multilingual support
 
-**DINOv2-Large** (1,024 dimensions)
+**DINOv3-Large** (1,024 dimensions)
 - Scene composition and spatial relationships
 - Artistic principles (rule of thirds, symmetry, balance)
-- Complementary to EfficientNetV2
+- +6 mIoU composition improvement
 
-**Storage**: ~5.9KB per wallpaper (all 4 embeddings + metadata), ~44MB for 10,000 wallpapers compressed
+**Storage**: ~6.2KB per wallpaper (all 4 embeddings + metadata), ~47MB for 10,000 wallpapers compressed
 
 ***
 
@@ -247,8 +247,8 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 
 ### Personalize Mode (Bridge Strategy)
 1. User uploads favorite wallpaper
-2. On-device MobileNetV3 extracts embedding (15ms)
-3. Find top 30 matches using MobileNetV3 embeddings
+2. On-device MobileNetV4 extracts embedding (faster than MobileNetV3)
+3. Find top 30 matches using MobileNetV4 embeddings (or 576D legacy projection)
 4. User confirms 4-10 they actually like
 5. Average their EfficientNetV2 embeddings = user preference
 6. Future recommendations use EfficientNetV2 (superior quality)
@@ -257,12 +257,12 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 1. User starts without upload
 2. First like initializes EfficientNetV2 preference
 3. All learning in superior embedding space
-4. MobileNetV3 bypassed entirely
+4. MobileNetV4 bypassed entirely
 
 ### Text Search (Future)
 1. User types "sunset beach"
-2. Cloudflare Worker encodes via SigLIP (~20ms)
-3. Compare against local SigLIP embeddings
+2. Cloudflare Worker encodes via SigLIP 2 (~20ms)
+3. Compare against local SigLIP 2 embeddings
 4. Instant semantic search results
 
 ***

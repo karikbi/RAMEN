@@ -23,7 +23,8 @@ from curate_wallpapers import CandidateWallpaper, Config
 from filters import HardFilters, FilterConfig, FilterResult
 from ml_quality_scorer import MLQualityScorer, MLQualityConfig, MLQualityScore
 from embeddings import EmbeddingExtractor, EmbeddingSet
-from metadata_generator import MetadataGenerator, WallpaperMetadata
+from metadata_generator import MetadataGenerator, WallpaperMetadata, CategoryClassifier
+from metadata_extractor import MetadataExtractor
 from config_loader import get_config
 
 
@@ -140,7 +141,39 @@ class FilteringPipeline:
             embedding_extractor=self.embedding_extractor,
             config=self.quality_config
         )
-        self.metadata_generator = MetadataGenerator()
+        
+        # Initialize category classifier with SigLIP from quality scorer
+        self.category_classifier = None
+        if self.ml_quality_scorer._ensure_siglip_loaded():
+            self.category_classifier = CategoryClassifier(
+                siglip_model=self.ml_quality_scorer._siglip_model,
+                siglip_processor=self.ml_quality_scorer._siglip_processor,
+                device=self.ml_quality_scorer._device or "cpu"
+            )
+            logger.info("Initialized ML-based category classifier")
+        
+        # Initialize MetadataExtractor (uses already-loaded models)
+        self.metadata_extractor = None
+        if self.ml_quality_scorer._ensure_siglip_loaded():
+            # Load DINOv3 for focal point detection
+            dinov3_model, dinov3_processor = self.embedding_extractor._load_dinov3()
+            
+            if dinov3_model is not None and dinov3_processor is not None:
+                self.metadata_extractor = MetadataExtractor(
+                    siglip_model=self.ml_quality_scorer._siglip_model,
+                    siglip_processor=self.ml_quality_scorer._siglip_processor,
+                    dinov3_model=dinov3_model,
+                    dinov3_processor=dinov3_processor,
+                    device=self.embedding_extractor.device
+                )
+                logger.info("Initialized MetadataExtractor with SigLIP + DINOv3")
+            else:
+                logger.warning("DINOv3 not available - MetadataExtractor will use gradient fallback for focal points")
+        
+        self.metadata_generator = MetadataGenerator(
+            category_classifier=self.category_classifier,
+            metadata_extractor=self.metadata_extractor
+        )
         
         # Statistics
         self.stats = FilteringStats()
@@ -228,14 +261,15 @@ class FilteringPipeline:
         embeddings.dinov2 = self.embedding_extractor.extract_dinov2(candidate.filepath)
 
         
-        # Step 5: Generate Metadata
+        # Step 5: Generate Metadata with ML classification
         metadata = self.metadata_generator.generate_metadata(
             filepath=candidate.filepath,
             title=candidate.title,
             artist=candidate.artist,
             source=candidate.source,
             source_metadata=candidate.metadata,
-            quality_score=ml_score.final_score
+            quality_score=ml_score,  # Pass entire MLQualityScore object
+            siglip_embedding=siglip_embedding
         )
         
         # Step 6: Move to approved directory
@@ -404,14 +438,15 @@ class FilteringPipeline:
                 embeddings.efficientnet_v2 = other_embeddings.efficientnet_v2
                 embeddings.dinov2 = other_embeddings.dinov2
                 
-                # Generate Metadata
+                # Generate Metadata with ML classification
                 metadata = self.metadata_generator.generate_metadata(
                     filepath=candidate.filepath,
                     title=candidate.title,
                     artist=candidate.artist,
                     source=candidate.source,
                     source_metadata=candidate.metadata,
-                    quality_score=ml_score.final_score
+                    quality_score=ml_score,  # Pass entire MLQualityScore object
+                    siglip_embedding=siglip_embedding
                 )
                 
                 # Move to approved directory

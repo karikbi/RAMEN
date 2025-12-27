@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-ML-Based Quality Scorer using LAION Aesthetic Predictor + SigLIP
+ML-Based Quality Scorer using Aesthetic Predictor V2.5 + SigLIP
 
 Hybrid scoring approach:
-1. Aesthetic Appeal - LAION Aesthetic Predictor V2 (trained on human ratings, 1-10 scale)
+1. Aesthetic Appeal - Aesthetic Predictor V2.5 (SigLIP-based, 1-10 scale)
 2. Technical Quality - SigLIP text-image alignment (sharp vs blurry)
 3. Wallpaper Suitability - SigLIP text-image alignment (wallpaper vs not)
 
-LAION Aesthetic Predictor was trained on millions of human aesthetic ratings from
-the AVA dataset, providing reliable aesthetic quality scores on a 1-10 scale.
+Aesthetic Predictor V2.5 is trained specifically on SigLIP embeddings,
+providing reliable aesthetic quality scores on a 1-10 scale. Scores of
+5.5+ indicate good aesthetics, with 6.5+ being premium quality.
 """
 
 import logging
@@ -28,10 +29,11 @@ class MLQualityScore:
     
     Attributes:
         final_score: Overall quality score (0-1), main decision value
-        aesthetic_score: LAION aesthetic score (normalized 0-1 from 1-10 scale)
+        aesthetic_score: Aesthetic V2.5 score (normalized 0-1 from 1-10 scale)
         technical_score: SigLIP-based technical quality check
         wallpaper_score: SigLIP-based wallpaper suitability check
-        raw_aesthetic: Original LAION score (1-10 scale)
+        raw_aesthetic: Original V2.5 score (1-10 scale)
+        quality_tier: Quality tier (premium/standard/acceptable/low)
         confidence: How certain the model is
         details: Raw data for debugging
     """
@@ -39,7 +41,8 @@ class MLQualityScore:
     aesthetic_score: float = 0.0
     technical_score: float = 0.0
     wallpaper_score: float = 0.0
-    raw_aesthetic: float = 0.0  # Original 1-10 LAION score
+    raw_aesthetic: float = 0.0  # Original 1-10 V2.5 score
+    quality_tier: str = "low"  # premium/standard/acceptable/low
     confidence: float = 0.0
     details: dict = field(default_factory=dict)
     
@@ -50,6 +53,7 @@ class MLQualityScore:
             "technical_score": self.technical_score,
             "wallpaper_score": self.wallpaper_score,
             "raw_aesthetic": self.raw_aesthetic,
+            "quality_tier": self.quality_tier,
             "confidence": self.confidence,
             "details": self.details
         }
@@ -58,14 +62,16 @@ class MLQualityScore:
 @dataclass
 class MLQualityConfig:
     """Configuration for ML quality scoring."""
-    # Threshold for approval (0.5 = 5/10 on LAION scale, reasonable minimum)
-    threshold: float = 0.50
+    # Threshold for approval (normalized 0-1 scale)
+    # V2.5 scores 1-10, normalized to 0-1. Threshold 0.61 = 5.5/10 (good quality)
+    # Quality tiers: 6.5+ Premium (0.72), 5.5-6.5 Standard (0.61), 4.0-5.5 Acceptable (0.44), <4.0 Low
+    threshold: float = 0.61
     
-    # SigLIP temperature for softmax (only used for technical/wallpaper checks)
+    # SigLIP temperature for softmax (for technical/wallpaper checks)
     temperature: float = 0.07
     
-    # Component weights - aesthetic is now the primary driver
-    aesthetic_weight: float = 0.60  # LAION aesthetic (most reliable)
+    # Component weights - aesthetic is the primary driver
+    aesthetic_weight: float = 0.60  # Aesthetic Predictor V2.5 (most reliable)
     technical_weight: float = 0.15  # SigLIP technical check
     wallpaper_weight: float = 0.25  # SigLIP wallpaper suitability
 
@@ -103,11 +109,11 @@ SOURCE_WEIGHTS = {
 class MLQualityScorer:
     """
     Hybrid ML-based quality scorer using:
-    - LAION Aesthetic Predictor V2 for aesthetic quality (1-10 human-rated scale)
+    - Aesthetic Predictor V2.5 for aesthetic quality (SigLIP-based, 1-10 scale)
     - SigLIP for technical quality and wallpaper suitability checks
     
-    This approach combines the best of both worlds:
-    - LAION's human-trained aesthetic model provides reliable 1-10 scores
+    This approach uses the correct vector space:
+    - V2.5 is trained specifically on SigLIP embeddings (not CLIP)
     - SigLIP's text-image alignment handles specific yes/no checks
     """
     
@@ -126,42 +132,42 @@ class MLQualityScorer:
         self.config = config or MLQualityConfig()
         self._extractor = embedding_extractor
         
-        # LAION Aesthetic Predictor
-        self._laion_model = None
-        self._laion_processor = None
+        # Aesthetic Predictor V2.5 (SigLIP-based)
+        self._aesthetic_model = None
+        self._aesthetic_processor = None
         
         # SigLIP (for technical/wallpaper checks)
         self._siglip_model = None
         self._siglip_processor = None
         self._device = None
     
-    def _ensure_laion_loaded(self) -> bool:
-        """Lazy load LAION Aesthetic Predictor V2."""
-        if self._laion_model is not None:
+    def _ensure_aesthetic_loaded(self) -> bool:
+        """Lazy load Aesthetic Predictor V2.5 (SigLIP-based)."""
+        if self._aesthetic_model is not None:
             return True
         
         try:
-            from aesthetics_predictor import AestheticsPredictorV2Linear
-            from transformers import CLIPProcessor
+            from aesthetic_predictor_v2_5 import convert_v2_5_from_siglip
+            import torch
             
-            model_name = "shunk031/aesthetics-predictor-v2-sac-logos-ava1-l14-linearMSE"
-            
-            self._laion_model = AestheticsPredictorV2Linear.from_pretrained(model_name)
-            self._laion_processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
+            # Load V2.5 model specifically trained for SigLIP embeddings
+            self._aesthetic_model, self._aesthetic_processor = convert_v2_5_from_siglip(
+                low_cpu_mem_usage=True,
+                trust_remote_code=True
+            )
             
             # Move to appropriate device
-            import torch
             if torch.cuda.is_available():
-                self._laion_model = self._laion_model.cuda()
+                self._aesthetic_model = self._aesthetic_model.cuda()
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self._laion_model = self._laion_model.to("mps")
+                self._aesthetic_model = self._aesthetic_model.to("mps")
             
-            self._laion_model.eval()
-            logger.info("Loaded LAION Aesthetic Predictor V2")
+            self._aesthetic_model.eval()
+            logger.info("Loaded Aesthetic Predictor V2.5 (SigLIP-based)")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to load LAION Aesthetic Predictor: {e}")
+            logger.error(f"Failed to load Aesthetic Predictor V2.5: {e}")
             return False
     
     def _ensure_siglip_loaded(self) -> bool:
@@ -183,7 +189,8 @@ class MLQualityScorer:
             from transformers import AutoProcessor, AutoModel
             import torch
             
-            model_name = "google/siglip-large-patch16-384"
+            # SigLIP 2: Better localization, multilingual, officially stable
+            model_name = "google/siglip2-large-patch16-384"
             self._siglip_processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
             self._siglip_model = AutoModel.from_pretrained(model_name)
             
@@ -198,16 +205,16 @@ class MLQualityScorer:
                 self._device = "cpu"
             
             self._siglip_model.eval()
-            logger.info("Loaded SigLIP-Large")
+            logger.info("Loaded SigLIP 2 Large")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to load SigLIP model: {e}")
+            logger.error(f"Failed to load SigLIP 2 model: {e}")
             return False
     
-    def _score_aesthetic_laion(self, image) -> Tuple[float, float]:
+    def _score_aesthetic_v25(self, image) -> Tuple[float, float]:
         """
-        Score aesthetic quality using LAION Aesthetic Predictor.
+        Score aesthetic quality using Aesthetic Predictor V2.5 (SigLIP-based).
         
         Args:
             image: PIL Image
@@ -217,15 +224,16 @@ class MLQualityScorer:
         """
         import torch
         
-        inputs = self._laion_processor(images=image, return_tensors="pt")
+        # Process image using V2.5 processor
+        pixel_values = self._aesthetic_processor(images=image, return_tensors="pt").pixel_values
         
         # Move to same device as model
-        device = next(self._laion_model.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        device = next(self._aesthetic_model.parameters()).device
+        pixel_values = pixel_values.to(device)
         
         with torch.no_grad():
             # Get aesthetic score (1-10 scale)
-            raw_score = self._laion_model(**inputs).logits.item()
+            raw_score = self._aesthetic_model(pixel_values).logits.squeeze().item()
         
         # Clamp to valid range and normalize to 0-1
         raw_score = max(1.0, min(10.0, raw_score))
@@ -277,7 +285,7 @@ class MLQualityScorer:
     
     def score(self, filepath) -> MLQualityScore:
         """
-        Score an image's quality using hybrid LAION + SigLIP approach.
+        Score an image's quality using Aesthetic V2.5 + SigLIP approach.
         
         Args:
             filepath: Path to the image file
@@ -288,12 +296,14 @@ class MLQualityScorer:
         result = MLQualityScore()
         
         # Load both models
-        laion_loaded = self._ensure_laion_loaded()
+        aesthetic_loaded = self._ensure_aesthetic_loaded()
         siglip_loaded = self._ensure_siglip_loaded()
         
-        if not laion_loaded and not siglip_loaded:
+        if not aesthetic_loaded and not siglip_loaded:
             logger.warning("No ML models available, using default passing score")
-            result.final_score = 0.75
+            result.final_score = 0.61  # Default to threshold (5.5/10 normalized)
+            result.raw_aesthetic = 5.5
+            result.quality_tier = "standard"
             result.confidence = 0.0
             return result
         
@@ -307,12 +317,12 @@ class MLQualityScorer:
             if img.mode != "RGB":
                 img = img.convert("RGB")
             
-            # 1. AESTHETIC SCORE (LAION - primary signal)
-            if laion_loaded:
-                result.aesthetic_score, result.raw_aesthetic = self._score_aesthetic_laion(img)
+            # 1. AESTHETIC SCORE (V2.5 - primary signal)
+            if aesthetic_loaded:
+                result.aesthetic_score, result.raw_aesthetic = self._score_aesthetic_v25(img)
             else:
-                # Fallback if LAION fails
-                result.aesthetic_score = 0.5
+                # Fallback if V2.5 fails (5.5/10 = 0.61 normalized)
+                result.aesthetic_score = 0.61
                 result.raw_aesthetic = 5.5
             
             # 2. TECHNICAL SCORE (SigLIP - is it sharp/clear?)
@@ -360,13 +370,16 @@ class MLQualityScorer:
             scores = [result.aesthetic_score, result.technical_score, result.wallpaper_score]
             result.confidence = 1.0 - np.std(scores)
             
+            # Set quality tier based on raw aesthetic score
+            result.quality_tier = get_quality_tier(result.raw_aesthetic)
+            
             result.details = {
-                "laion_loaded": laion_loaded,
+                "aesthetic_loaded": aesthetic_loaded,
                 "siglip_loaded": siglip_loaded
             }
             
             logger.info(
-                f"Quality: LAION_aes={result.raw_aesthetic:.1f}/10 ({result.aesthetic_score:.2f}), "
+                f"Quality: V2.5={result.raw_aesthetic:.1f}/10 ({result.quality_tier}), "
                 f"tech={result.technical_score:.2f}, wall={result.wallpaper_score:.2f} -> "
                 f"FINAL={result.final_score:.3f}"
             )
@@ -391,11 +404,13 @@ class MLQualityScorer:
         result = MLQualityScore()
         embedding = None
         
-        laion_loaded = self._ensure_laion_loaded()
+        aesthetic_loaded = self._ensure_aesthetic_loaded()
         siglip_loaded = self._ensure_siglip_loaded()
         
-        if not laion_loaded and not siglip_loaded:
-            result.final_score = 0.75
+        if not aesthetic_loaded and not siglip_loaded:
+            result.final_score = 0.61  # Default to threshold (5.5/10 normalized)
+            result.raw_aesthetic = 5.5
+            result.quality_tier = "standard"
             return result, None
         
         try:
@@ -407,11 +422,11 @@ class MLQualityScorer:
             if img.mode != "RGB":
                 img = img.convert("RGB")
             
-            # LAION aesthetic score
-            if laion_loaded:
-                result.aesthetic_score, result.raw_aesthetic = self._score_aesthetic_laion(img)
+            # Aesthetic V2.5 score
+            if aesthetic_loaded:
+                result.aesthetic_score, result.raw_aesthetic = self._score_aesthetic_v25(img)
             else:
-                result.aesthetic_score = 0.5
+                result.aesthetic_score = 0.61
                 result.raw_aesthetic = 5.5
             
             # SigLIP for technical, wallpaper, and embedding
@@ -458,8 +473,11 @@ class MLQualityScorer:
                 result.wallpaper_score
             ])
             
+            # Set quality tier
+            result.quality_tier = get_quality_tier(result.raw_aesthetic)
+            
             logger.info(
-                f"Quality: LAION={result.raw_aesthetic:.1f}/10, "
+                f"Quality: V2.5={result.raw_aesthetic:.1f}/10 ({result.quality_tier}), "
                 f"tech={result.technical_score:.2f}, wall={result.wallpaper_score:.2f} -> "
                 f"FINAL={result.final_score:.3f}"
             )
@@ -497,11 +515,13 @@ class MLQualityScorer:
         source_key = source.lower() if source.lower() in SOURCE_WEIGHTS else "default"
         weights = SOURCE_WEIGHTS[source_key]
         
-        laion_loaded = self._ensure_laion_loaded()
+        aesthetic_loaded = self._ensure_aesthetic_loaded()
         siglip_loaded = self._ensure_siglip_loaded()
         
-        if not laion_loaded and not siglip_loaded:
-            result.final_score = 0.75
+        if not aesthetic_loaded and not siglip_loaded:
+            result.final_score = 0.61  # Default to threshold (5.5/10 normalized)
+            result.raw_aesthetic = 5.5
+            result.quality_tier = "standard"
             return result, None
         
         try:
@@ -513,11 +533,11 @@ class MLQualityScorer:
             if img.mode != "RGB":
                 img = img.convert("RGB")
             
-            # LAION aesthetic score (primary signal)
-            if laion_loaded:
-                result.aesthetic_score, result.raw_aesthetic = self._score_aesthetic_laion(img)
+            # Aesthetic V2.5 score (primary signal)
+            if aesthetic_loaded:
+                result.aesthetic_score, result.raw_aesthetic = self._score_aesthetic_v25(img)
             else:
-                result.aesthetic_score = 0.5
+                result.aesthetic_score = 0.61
                 result.raw_aesthetic = 5.5
             
             # SigLIP for technical and wallpaper checks
@@ -563,10 +583,13 @@ class MLQualityScorer:
                 result.wallpaper_score
             ])
             
+            # Set quality tier
+            result.quality_tier = get_quality_tier(result.raw_aesthetic)
+            
             result.details = {"source": source, "weights": weights}
             
             logger.info(
-                f"Quality [{source}]: LAION={result.raw_aesthetic:.1f}/10×{weights['aesthetic']}, "
+                f"Quality [{source}]: V2.5={result.raw_aesthetic:.1f}/10 ({result.quality_tier})×{weights['aesthetic']}, "
                 f"tech={result.technical_score:.2f}×{weights['technical']}, "
                 f"wall={result.wallpaper_score:.2f}×{weights['wallpaper']} -> "
                 f"FINAL={result.final_score:.3f}"
@@ -579,3 +602,28 @@ class MLQualityScorer:
             result.final_score = 0.75
             return result, None
 
+
+def get_quality_tier(raw_aesthetic: float) -> str:
+    """
+    Get quality tier based on Aesthetic Predictor V2.5 score.
+    
+    Aesthetic Predictor V2.5 Scale (1-10):
+    - 6.5-10: Premium (feature in "Best", show first)
+    - 5.5-6.5: Standard (general catalog)
+    - 4.0-5.5: Acceptable (lower priority)
+    - <4.0: Low (filter out or "All" category only)
+    
+    Args:
+        raw_aesthetic: V2.5 aesthetic score (1-10 scale)
+        
+    Returns:
+        Quality tier string: "premium", "standard", "acceptable", or "low"
+    """
+    if raw_aesthetic >= 6.5:
+        return "premium"
+    elif raw_aesthetic >= 5.5:
+        return "standard"
+    elif raw_aesthetic >= 4.0:
+        return "acceptable"
+    else:
+        return "low"

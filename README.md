@@ -19,11 +19,11 @@ Build a world-class wallpaper dataset with best-in-class embeddings and the rich
 - **Smart source optimization** based on acceptance rates
 - **Automatic deduplication** using perceptual hashing
 
-### 🧠 4-Model Embedding System
-- **MobileNetV3-Small** (576D): Device compatibility, on-device inference
+### 🧠 4-Model Embedding System (V2 Stack)
+- **MobileNetV4-Small** (960D): Device compatibility with 576D legacy projection
 - **EfficientNetV2-Large** (1,280D): Visual similarity and aesthetic quality
-- **SigLIP-Large** (1,152D): Semantic understanding and text search
-- **DINOv2-Large** (1,024D): Scene composition and spatial relationships
+- **SigLIP 2 Large** (1,152D): Semantic understanding and text search
+- **DINOv3-Large** (1,024D): Scene composition and spatial relationships
 
 ### 📊 Premium Metadata (20+ Fields)
 - 5-color palettes (LAB color space)
