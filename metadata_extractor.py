@@ -26,64 +26,68 @@ logger = logging.getLogger("wallpaper_curator")
 # VOCABULARY DEFINITIONS
 # =============================================================================
 
+# =============================================================================
+# VOCABULARY DEFINITIONS (Contextual Prompts for SigLIP)
+# =============================================================================
+
 CATEGORY_VOCABULARY = {
     # Natural & Landscapes
-    "nature": "a landscape photo of mountains, forests, oceans, lakes, rivers, or natural scenery",
-    "space": "a photo of galaxies, nebulae, stars, planets, aurora, or cosmic phenomena",
-    "animals": "photos of animals, birds, wildlife, pets, or creatures in nature",
-    "underwater": "underwater photography, ocean depths, marine life, or aquatic scenes",
-    "aerial": "aerial views, drone photography, or bird's eye view landscapes",
+    "nature": "a photo of a natural landscape with mountains, forests, oceans, or rivers",
+    "space": "a photo of outer space showing galaxies, stars, planets, or nebulae",
+    "animals": "a photo featuring animals, wildlife, birds, or creatures in their habitat",
+    "underwater": "an underwater photo of the ocean depths, marine life, or coral reefs",
+    "aerial": "an aerial view photo taken from a drone or bird's eye perspective",
     
     # Urban & Architecture
-    "urban": "a photo of city skylines, streets, urban landscapes, or metropolitan scenes",
-    "architecture": "architectural photography, buildings, structures, or modern design",
-    "automotive": "cars, motorcycles, vehicles, racing, or automotive photography",
+    "urban": "a photo of a city skyline, urban street, or metropolitan architecture",
+    "architecture": "a photo focusing on modern building design, structures, or geometry",
+    "automotive": "a photo of cars, motorcycles, or vehicles in a cinematic style",
     
     # Art & Design
-    "abstract": "abstract art, geometric patterns, gradients, shapes, or non-representational designs",
-    "minimalist": "minimalist design, simple clean aesthetics, negative space, or minimal compositions",
-    "art": "digital art, illustration, painting, fantasy art, or artistic concept art",
-    "anime": "anime art style, manga illustrations, or Japanese animation aesthetics",
-    "vintage": "vintage aesthetics, retro style, old-fashioned, or nostalgic imagery",
+    "abstract": "an abstract image with geometric patterns, shapes, or non-representational designs",
+    "minimalist": "a minimalist image with simple composition and negative space",
+    "art": "a piece of digital art, illustration, painting, or concept art",
+    "anime": "an anime or manga style illustration with japanese animation aesthetics",
+    "vintage": "an image with a vintage, retro, or old-fashioned aesthetic",
     
     # Technology & Gaming
-    "technology": "cyberpunk, futuristic, sci-fi, neon, or technology-themed imagery",
-    "gaming": "video game screenshots, gaming aesthetics, or game-related artwork",
+    "technology": "a futuristic image with cyberpunk, neon, or sci-fi technology themes",
+    "gaming": "a video game screenshot or gaming-related digital artwork",
     
     # Themes & Moods
-    "dark": "dark themes, black backgrounds, AMOLED-friendly, or low-key photography",
-    "colorful": "bright vibrant colors, vivid imagery, rainbow colors, or highly saturated photos",
+    "dark": "a dark, low-key image suitable for AMOLED screens with black backgrounds",
+    "colorful": "a vibrant, highly saturated image with bright rainbow colors",
     
     # Seasonal & Weather
-    "seasonal": "seasonal imagery, spring blossoms, autumn leaves, winter snow, or summer scenes",
-    "weather": "weather phenomena, rain, storms, clouds, lightning, or atmospheric conditions",
+    "seasonal": "a seasonal image showing spring, summer, autumn leaves, or winter snow",
+    "weather": "a photo featuring weather elements like rain, storms, lightning, or clouds",
 }
 
 MOOD_VOCABULARY = {
-    "calm": "a calm peaceful serene tranquil wallpaper",
-    "dramatic": "a dramatic intense powerful striking wallpaper",
-    "mysterious": "a mysterious dark moody atmospheric wallpaper",
-    "energetic": "a vibrant energetic dynamic lively wallpaper",
-    "romantic": "a romantic warm soft dreamy wallpaper",
-    "melancholic": "a melancholic sad nostalgic lonely wallpaper",
-    "inspiring": "an inspiring uplifting motivational hopeful wallpaper",
-    "cozy": "a cozy warm comfortable inviting wallpaper",
-    "epic": "an epic grand majestic awe-inspiring wallpaper",
-    "surreal": "a surreal dreamlike otherworldly fantastical wallpaper",
+    "calm": "an image conveying a calm, peaceful, and serene atmosphere",
+    "dramatic": "an image conveying a dramatic, intense, and striking atmosphere",
+    "mysterious": "an image conveying a mysterious, dark, and enigmatic atmosphere",
+    "energetic": "an image conveying an energetic, dynamic, and lively atmosphere",
+    "romantic": "an image conveying a romantic, soft, and dreamy atmosphere",
+    "melancholic": "an image conveying a melancholic, sad, or lonely atmosphere",
+    "inspiring": "an image conveying an inspiring, uplifting, and hopeful atmosphere",
+    "cozy": "an image conveying a cozy, warm, and comfortable atmosphere",
+    "epic": "an image conveying an epic, grand, and majestic atmosphere",
+    "surreal": "an image conveying a surreal, dreamlike, and fantastical atmosphere",
 }
 
 STYLE_VOCABULARY = {
-    "nord": "a nord color scheme blue gray dark wallpaper",
-    "gruvbox": "a gruvbox color scheme orange brown retro wallpaper",
-    "dracula": "a dracula theme purple dark gothic wallpaper",
-    "monokai": "a monokai dark theme with vibrant accent colors",
-    "solarized": "a solarized color scheme warm yellow blue wallpaper",
-    "catppuccin": "a catppuccin pastel color palette soft wallpaper",
-    "cyberpunk": "a cyberpunk neon futuristic sci-fi wallpaper",
-    "vaporwave": "a vaporwave aesthetic pink purple retro 80s wallpaper",
-    "minimalist": "a minimalist simple clean sparse wallpaper",
-    "vintage": "a vintage retro old-fashioned nostalgic wallpaper",
-    "natural": "a natural organic earthy green brown wallpaper",
+    "nord": "an image with the nord color palette using cool blue and gray tones",
+    "gruvbox": "an image with the gruvbox color palette using retro orange and brown tones",
+    "dracula": "an image with the dracula color theme using dark purple and vampire tones",
+    "monokai": "an image with the monokai color theme using dark background and vibrant accents",
+    "solarized": "an image with the solarized color palette using warm yellow and blue tones",
+    "catppuccin": "an image with the catppuccin pastel color palette",
+    "cyberpunk": "an image in the cyberpunk style with neon lights and high-tech aesthetics",
+    "vaporwave": "an image in the vaporwave style with retro 80s pink and purple aesthetics",
+    "minimalist": "an image in the minimalist style with clean lines and simplicity",
+    "vintage": "an image in the vintage style with film grain and retro processing",
+    "natural": "an image in the natural style with organic earthy green and brown tones",
 }
 
 COMPOSITION_VOCABULARY = {
@@ -164,6 +168,10 @@ class MetadataExtractor:
         self.dinov3_processor = dinov3_processor
         self.device = device
         
+        # SigLIP parameters for probability calculation
+        self.logit_scale = None
+        self.logit_bias = None
+        
         # Precomputed text embeddings (lazy loading)
         self._category_embeddings = None
         self._mood_embeddings = None
@@ -171,7 +179,7 @@ class MetadataExtractor:
         self._composition_embeddings = None
         self._text_embeddings_ready = False
         
-        # Precompute text embeddings if SigLIP available now
+        # Extract params and precompute text embeddings if SigLIP available now
         self._ensure_text_embeddings()
     
     def set_siglip_model(self, siglip_model, siglip_processor, device: str = None):
@@ -189,6 +197,32 @@ class MetadataExtractor:
         self._text_embeddings_ready = False
         self._ensure_text_embeddings()
     
+    def _extract_siglip_params(self):
+        """Extract logit_scale and logit_bias from SigLIP model."""
+        if self.siglip_model is None:
+            return
+
+        try:
+            # HuggingFace SiglipModel stores these as parameters
+            if hasattr(self.siglip_model, "logit_scale"):
+                self.logit_scale = self.siglip_model.logit_scale.item()
+                if hasattr(self.siglip_model, "logit_bias"):
+                    # logit_bias is usually a vector in training, but scalar scalar for inference?
+                    # Check shape. If vector, maybe take mean or 0? 
+                    # SigLIP paper uses a scalar bias per class, but for zero-shot we often rely on the dot product.
+                    # HuggingFace implem often has logit_bias as scalar or None.
+                    bias = self.siglip_model.logit_bias
+                    if hasattr(bias, "item"):
+                        self.logit_bias = bias.item()
+                    else:
+                        self.logit_bias = 0.0 # Default fallback
+            
+            logger.info(f"Extracted SigLIP params: scale={self.logit_scale}, bias={self.logit_bias}")
+        except Exception as e:
+            logger.warning(f"Failed to extract SigLIP params: {e}. Using defaults.")
+            self.logit_scale = np.log(10) # Default approximate scale
+            self.logit_bias = -10 # Default bias
+    
     def _ensure_text_embeddings(self) -> bool:
         """
         Ensure text embeddings are precomputed. Called lazily when needed.
@@ -202,6 +236,9 @@ class MetadataExtractor:
         if self.siglip_model is None or self.siglip_processor is None:
             logger.debug("Cannot precompute text embeddings: SigLIP model not available")
             return False
+            
+        # Extract model params first
+        self._extract_siglip_params()
         
         logger.info("Precomputing text embeddings for zero-shot classification...")
         self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
@@ -287,9 +324,9 @@ class MetadataExtractor:
         vocabulary: dict,
         precomputed_embeddings: Optional[np.ndarray],
         top_k: int = 2,
-        threshold: float = 0.20
+        threshold: float = 0.5  # Standard probability threshold
     ) -> List[Tuple[str, float]]:
-        """Classify image against a vocabulary using cosine similarity."""
+        """Classify image against a vocabulary using sigmoid probability."""
         if precomputed_embeddings is None:
             logger.debug("Classification skipped: precomputed_embeddings is None")
             return []
@@ -298,26 +335,46 @@ class MetadataExtractor:
             # Ensure consistent dtype for dot product (text embeddings are float32)
             image_embedding = image_embedding.astype(np.float32)
             
-            # Compute cosine similarities
-            similarities = np.dot(precomputed_embeddings, image_embedding)
+            # Compute raw logits (cosine similarity)
+            logits = np.dot(precomputed_embeddings, image_embedding)
+            
+            # Apply SigLIP probability transformation: sigmoid(logit * exp(scale) + bias)
+            if self.logit_scale is not None and self.logit_bias is not None:
+                # Use model-specific scaling if available
+                scale = np.exp(self.logit_scale)
+                bias = self.logit_bias
+                scaled_logits = (logits * scale) + bias
+                probs = 1 / (1 + np.exp(-scaled_logits))
+            else:
+                # Fallback: Treat raw cosine similarity as score (not ideal, explains low values)
+                # Raw cosine is usually 0.1-0.3 for SigLIP, so we just pass it through
+                # This path should mostly not be taken now that we extract params
+                probs = logits
+            
+            # Log score statistics
+            if len(probs) > 0:
+                min_score = float(np.min(probs))
+                max_score = float(np.max(probs))
+                mean_score = float(np.mean(probs))
+                logger.info(f"Class probabilities: min={min_score:.3f}, max={max_score:.3f}, mean={mean_score:.3f}")
             
             # Get top-k above threshold
             vocab_keys = list(vocabulary.keys())
             results = []
             
-            for i, score in enumerate(similarities):
+            for i, score in enumerate(probs):
                 if score >= threshold:
                     results.append((vocab_keys[i], float(score)))
             
             results.sort(key=lambda x: x[1], reverse=True)
             
-            # Debug: Log top 3 scores if no results pass threshold
-            if not results and len(similarities) > 0:
-                top_indices = np.argsort(similarities)[-3:][::-1]
-                top_items = [(vocab_keys[i], float(similarities[i])) for i in top_indices]
-                logger.debug(
+            # Info log: Show top 3 scores if no results pass threshold
+            if not results and len(probs) > 0:
+                top_indices = np.argsort(probs)[-3:][::-1]
+                top_items = [(vocab_keys[i], float(probs[i])) for i in top_indices]
+                logger.info(
                     f"No items passed threshold {threshold:.2f}. "
-                    f"Top 3 scores: {top_items}"
+                    f"Top 3 prob matches: {top_items}"
                 )
             
             return results[:top_k]
@@ -343,16 +400,19 @@ class MetadataExtractor:
         if self._category_embeddings is None:
             self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
         
+        if self._category_embeddings is None:
+            self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
+        
         results = self._classify_against_vocabulary(
             image_embedding,
             CATEGORY_VOCABULARY,
             self._category_embeddings,
             top_k=top_k,
-            threshold=0.15  # Lowered from 0.20 - SigLIP similarities are lower than CLIP
+            threshold=0.40  # Probability threshold
         )
         
         if not results:
-            logger.debug("Category classification returned empty (below threshold 0.15)")
+            logger.debug("Category classification returned empty (below prob threshold 0.40)")
             return "general", [], 0.0
         
         primary = results[0][0]
@@ -371,7 +431,7 @@ class MetadataExtractor:
             MOOD_VOCABULARY,
             self._mood_embeddings,
             top_k=top_k,
-            threshold=0.18  # Lowered from 0.22 - SigLIP similarities are lower than CLIP
+            threshold=0.50  # Standard probability threshold
         )
         
         return [r[0] for r in results]
@@ -386,7 +446,7 @@ class MetadataExtractor:
             STYLE_VOCABULARY,
             self._style_embeddings,
             top_k=top_k,
-            threshold=0.18  # Lowered from 0.22 - SigLIP similarities are lower than CLIP
+            threshold=0.50  # Standard probability threshold
         )
         
         return [r[0] for r in results]
@@ -401,7 +461,7 @@ class MetadataExtractor:
             COMPOSITION_VOCABULARY,
             self._composition_embeddings,
             top_k=1,
-            threshold=0.15
+            threshold=0.40
         )
         
         return results[0][0] if results else "balanced"
@@ -486,23 +546,31 @@ class MetadataExtractor:
     
     def compute_symmetry(self, image: Image.Image) -> float:
         """
-        Compute horizontal symmetry score by comparing with flipped image.
+        Compute symmetry score (0-1).
         
-        Returns:
-            Symmetry score 0-1 (1 = perfectly symmetrical)
+        Uses pixel-wise MSE on the flipped image, but with Gaussian Blur 
+        to be robust to high-frequency noise and textures.
         """
-        # Convert to grayscale and resize for efficiency
-        img_small = image.resize((200, 200), Image.Resampling.LANCZOS)
-        gray = np.array(img_small.convert("L"), dtype=np.float32)
+        # Resize to small square to focus on macro symmetry and ignore details
+        # 64x64 is small enough to ignore minor textures but keep shapes
+        img_small = image.resize((64, 64), Image.Resampling.LANCZOS)
+        gray = np.array(img_small.convert("L"))
         
-        # Compare with horizontally flipped version
-        flipped = np.fliplr(gray)
+        # Apply Gaussian Blur to remove high-frequency noise
+        # This makes the conceptual symmetry check much more robust
+        blurred = cv2.GaussianBlur(gray, (5, 5), 2.0)
         
-        # Compute normalized difference
-        diff = np.abs(gray - flipped).mean()
-        symmetry = 1.0 - (diff / 255.0)
+        # Calculate MSE between image and its horizontal flip
+        flipped = np.fliplr(blurred)
+        mse = np.mean((blurred - flipped) ** 2)
         
-        return float(symmetry)
+        # Normalize to 0-1 score (inverted MSE)
+        # Using a sensitivity factor. 
+        # MSE of ~500 (pixel diff ~22) should give score ~0.5
+        sensitivity = 1000.0 
+        score = np.exp(-mse / sensitivity)
+        
+        return float(max(0.0, min(1.0, score)))
     
     # =========================================================================
     # DINOV3 FOCAL POINT
