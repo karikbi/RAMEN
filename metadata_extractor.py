@@ -164,21 +164,59 @@ class MetadataExtractor:
         self.dinov3_processor = dinov3_processor
         self.device = device
         
-        # Precomputed text embeddings (eager loading for performance)
-        # Precompute on init to avoid first-call delay
+        # Precomputed text embeddings (lazy loading)
         self._category_embeddings = None
         self._mood_embeddings = None
         self._style_embeddings = None
         self._composition_embeddings = None
+        self._text_embeddings_ready = False
         
-        # Precompute text embeddings if SigLIP available
-        if self.siglip_model is not None and self.siglip_processor is not None:
-            logger.info("Precomputing text embeddings for zero-shot classification...")
-            self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
-            self._mood_embeddings = self._precompute_text_embeddings(MOOD_VOCABULARY)
-            self._style_embeddings = self._precompute_text_embeddings(STYLE_VOCABULARY)
-            self._composition_embeddings = self._precompute_text_embeddings(COMPOSITION_VOCABULARY)
-            logger.info("Text embeddings precomputed (eliminates first-call delay)")
+        # Precompute text embeddings if SigLIP available now
+        self._ensure_text_embeddings()
+    
+    def set_siglip_model(self, siglip_model, siglip_processor, device: str = None):
+        """
+        Set or update SigLIP model after initialization.
+        
+        This is useful when SigLIP is lazy-loaded elsewhere and becomes available later.
+        """
+        self.siglip_model = siglip_model
+        self.siglip_processor = siglip_processor
+        if device:
+            self.device = device
+        
+        # Reset and precompute text embeddings
+        self._text_embeddings_ready = False
+        self._ensure_text_embeddings()
+    
+    def _ensure_text_embeddings(self) -> bool:
+        """
+        Ensure text embeddings are precomputed. Called lazily when needed.
+        
+        Returns:
+            True if text embeddings are ready, False otherwise.
+        """
+        if self._text_embeddings_ready:
+            return True
+        
+        if self.siglip_model is None or self.siglip_processor is None:
+            logger.debug("Cannot precompute text embeddings: SigLIP model not available")
+            return False
+        
+        logger.info("Precomputing text embeddings for zero-shot classification...")
+        self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
+        self._mood_embeddings = self._precompute_text_embeddings(MOOD_VOCABULARY)
+        self._style_embeddings = self._precompute_text_embeddings(STYLE_VOCABULARY)
+        self._composition_embeddings = self._precompute_text_embeddings(COMPOSITION_VOCABULARY)
+        
+        # Check if any succeeded
+        if self._category_embeddings is not None:
+            self._text_embeddings_ready = True
+            logger.info("Text embeddings precomputed successfully")
+            return True
+        else:
+            logger.warning("Failed to precompute text embeddings")
+            return False
     
     @classmethod
     def from_embedding_extractor(cls, embedding_extractor, quality_scorer=None) -> "MetadataExtractor":

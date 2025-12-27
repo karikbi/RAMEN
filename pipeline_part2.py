@@ -426,6 +426,17 @@ class FilteringPipeline:
         # =====================================================================
         # PASS 3: Embedding Extraction for APPROVED only (MobileNet, EfficientNet, DINOv2)
         # =====================================================================
+        
+        # IMPORTANT: Update MetadataExtractor with the now-loaded SigLIP model
+        # SigLIP was lazy-loaded during Pass 2 quality scoring, so now it's available
+        # This triggers text embedding precomputation for category/mood/style classification
+        if self.metadata_extractor is not None:
+            self.metadata_extractor.set_siglip_model(
+                self.ml_quality_scorer._siglip_model,
+                self.ml_quality_scorer._siglip_processor,
+                self.ml_quality_scorer._device or self.embedding_extractor.device
+            )
+        
         logger.info(f"\n🔍 Pass 3: Extracting embeddings for {len(quality_passed)} approved wallpapers...")
         iterator3 = tqdm(quality_passed, desc="Pass 3: Embeddings") if show_progress else quality_passed
         
