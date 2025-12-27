@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **V2 Model Stack Upgrade**:
-  - MobileNetV3-Small (576D) → MobileNetV4-Small (960D) via `timm` with 576D legacy projection
+  - MobileNetV3-Small (576D) → MobileNetV4-Small (1280D) via `timm` (includes 960→1280 projection)
   - SigLIP v1-Large → SigLIP 2 Large for better localization
   - DINOv2-Large → DINOv3-Large via HuggingFace (+6 mIoU composition)
   - EfficientNetV2-Large retained (1280D)

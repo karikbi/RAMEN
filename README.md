@@ -20,7 +20,7 @@ Build a world-class wallpaper dataset with best-in-class embeddings and the rich
 - **Automatic deduplication** using perceptual hashing
 
 ### 🧠 4-Model Embedding System (V2 Stack)
-- **MobileNetV4-Small** (960D): Device compatibility with 576D legacy projection
+- **MobileNetV4-Small** (1280D): Device compatibility (timm includes 960→1280 projection)
 - **EfficientNetV2-Large** (1,280D): Visual similarity and aesthetic quality
 - **SigLIP 2 Large** (1,152D): Semantic understanding and text search
 - **DINOv3-Large** (1,024D): Scene composition and spatial relationships

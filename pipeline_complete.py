@@ -119,7 +119,7 @@ class WallpaperCurationPipeline:
         
         # Get quality threshold from central config if not specified
         if quality_threshold is None:
-            quality_threshold = get_config().get('quality.threshold', 0.40)
+            quality_threshold = get_config().get('quality.threshold', 5.5)
         self.quality_threshold = quality_threshold
         self.skip_upload = skip_upload
         self.skip_part1 = skip_part1

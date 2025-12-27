@@ -105,7 +105,7 @@ class CollectionValidator:
     ]
     
     EMBEDDING_DIMENSIONS = {
-        "mobilenet_v4": 960,
+        "mobilenet_v4": 1280,
         "efficientnet_v2": 1280,
         "siglip": 1152,
         "dinov2": 1024,
@@ -302,17 +302,29 @@ class CollectionValidator:
         )
     
     def check_quality_scores(self) -> ValidationResult:
-        """Validate quality scores are in expected range."""
+        """Validate quality scores are in expected range.
+        
+        Supports both legacy 0-1 normalized scores and new 1-10 Aesthetic V2.5 scores.
+        Auto-detects the scale based on score values.
+        """
         errors = []
         score_sum = 0
         score_count = 0
         below_threshold = 0
         
-        # Get threshold from central config
+        # Get threshold from central config (1-10 scale)
         if HAS_CONFIG_LOADER:
-            threshold = get_config().get('quality.threshold', 0.40)
+            threshold = get_config().get('quality.threshold', 5.5)
         else:
-            threshold = 0.40
+            threshold = 5.5
+        
+        # Auto-detect score format: if all scores <= 1.0, it's legacy 0-1 format
+        sample_scores = [wp.get("quality_score", 0) for wp in self.collection[:100] 
+                        if isinstance(wp.get("quality_score"), (int, float))]
+        is_legacy_format = all(s <= 1.0 for s in sample_scores) if sample_scores else False
+        
+        # Convert threshold for comparison if using legacy format
+        compare_threshold = (threshold - 1.0) / 9.0 if is_legacy_format else threshold
         
         for wp in self.collection:
             wp_id = wp.get("id", "unknown")
@@ -322,27 +334,37 @@ class CollectionValidator:
                 errors.append(f"{wp_id}: missing quality_score")
             elif not isinstance(score, (int, float)):
                 errors.append(f"{wp_id}: quality_score is not a number")
-            elif score < 0 or score > 1:
-                errors.append(f"{wp_id}: quality_score {score} out of range [0,1]")
             else:
+                # Validate range based on detected format
+                if is_legacy_format:
+                    if score < 0 or score > 1:
+                        errors.append(f"{wp_id}: quality_score {score} out of range [0,1]")
+                else:
+                    if score < 1 or score > 10:
+                        errors.append(f"{wp_id}: quality_score {score} out of range [1,10]")
+                
                 score_sum += score
                 score_count += 1
-                if score < threshold:
+                if score < compare_threshold:
                     below_threshold += 1
         
         avg_score = score_sum / score_count if score_count > 0 else 0
         passed = len(errors) == 0
         
+        format_note = "(legacy 0-1)" if is_legacy_format else "(1-10 scale)"
+        display_threshold = compare_threshold if is_legacy_format else threshold
+        
         return ValidationResult(
             check_name="Quality Scores",
             passed=passed,
-            message=f"Average quality: {avg_score:.3f} (threshold: {threshold})" if passed
+            message=f"Average quality: {avg_score:.3f} {format_note}" if passed
                     else f"{len(errors)} invalid quality scores",
             errors=errors[:20],
-            warnings=[f"{below_threshold} wallpapers below {threshold} threshold"] if below_threshold else [],
+            warnings=[f"{below_threshold} wallpapers below {display_threshold} threshold"] if below_threshold else [],
             stats={
                 "average_score": round(avg_score, 4),
-                "threshold": threshold,
+                "threshold": display_threshold,
+                "format": "legacy_0_1" if is_legacy_format else "aesthetic_v25_1_10",
                 "below_threshold": below_threshold,
                 "valid_scores": score_count,
             }

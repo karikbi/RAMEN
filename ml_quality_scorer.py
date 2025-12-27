@@ -62,10 +62,9 @@ class MLQualityScore:
 @dataclass
 class MLQualityConfig:
     """Configuration for ML quality scoring."""
-    # Threshold for approval (normalized 0-1 scale)
-    # V2.5 scores 1-10, normalized to 0-1. Threshold 0.61 = 5.5/10 (good quality)
-    # Quality tiers: 6.5+ Premium (0.72), 5.5-6.5 Standard (0.61), 4.0-5.5 Acceptable (0.44), <4.0 Low
-    threshold: float = 0.61
+    # Threshold for approval (1-10 scale, native Aesthetic V2.5 scores)
+    # Quality tiers: 6.5+ Premium, 5.5-6.5 Standard, 4.0-5.5 Acceptable, <4.0 Low
+    threshold: float = 5.5
     
     # SigLIP temperature for softmax (for technical/wallpaper checks)
     temperature: float = 0.07
@@ -301,8 +300,8 @@ class MLQualityScorer:
         
         if not aesthetic_loaded and not siglip_loaded:
             logger.warning("No ML models available, using default passing score")
-            result.final_score = 0.61  # Default to threshold (5.5/10 normalized)
-            result.raw_aesthetic = 5.5
+            result.final_score = 0.61  # Normalized default
+            result.raw_aesthetic = 5.5  # Default threshold (1-10 scale)
             result.quality_tier = "standard"
             result.confidence = 0.0
             return result
@@ -408,8 +407,8 @@ class MLQualityScorer:
         siglip_loaded = self._ensure_siglip_loaded()
         
         if not aesthetic_loaded and not siglip_loaded:
-            result.final_score = 0.61  # Default to threshold (5.5/10 normalized)
-            result.raw_aesthetic = 5.5
+            result.final_score = 0.61  # Normalized default
+            result.raw_aesthetic = 5.5  # Default threshold (1-10 scale)
             result.quality_tier = "standard"
             return result, None
         
@@ -519,8 +518,8 @@ class MLQualityScorer:
         siglip_loaded = self._ensure_siglip_loaded()
         
         if not aesthetic_loaded and not siglip_loaded:
-            result.final_score = 0.61  # Default to threshold (5.5/10 normalized)
-            result.raw_aesthetic = 5.5
+            result.final_score = 0.61  # Normalized default
+            result.raw_aesthetic = 5.5  # Default threshold (1-10 scale)
             result.quality_tier = "standard"
             return result, None
         

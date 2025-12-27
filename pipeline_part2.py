@@ -106,7 +106,7 @@ class FilteringPipeline:
     Main filtering pipeline that processes candidates through a THREE-PASS approach:
     
     1. Hard filters (auto-reject) - ALL candidates
-    2. ML-based quality scoring (SigLIP + LAION) - ALL that passed hard filters
+    2. ML-based quality scoring (Aesthetic V2.5) - ALL that passed hard filters
     3. Embedding extraction (MobileNet, EfficientNet, DINOv2) - APPROVED only
     
     This ensures all candidates are scored before any slow embedding extraction,
@@ -239,13 +239,13 @@ class FilteringPipeline:
         )
 
         
-        # Step 3: Quality Check
-        if ml_score.final_score < self.quality_config.threshold:
+        # Step 3: Quality Check (using raw_aesthetic on 1-10 scale)
+        if ml_score.raw_aesthetic < self.quality_config.threshold:
             self.stats.rejected_quality_score += 1
             self.hard_filters.reject_candidate(
                 candidate.filepath,
-                f"Quality score {ml_score.final_score:.3f} < {self.quality_config.threshold} "
-                f"(aes={ml_score.aesthetic_score:.2f}, tech={ml_score.technical_score:.2f}, wall={ml_score.wallpaper_score:.2f})"
+                f"Quality score {ml_score.raw_aesthetic:.1f}/10 < {self.quality_config.threshold}/10 "
+                f"(tech={ml_score.technical_score:.2f}, wall={ml_score.wallpaper_score:.2f})"
             )
             return None
         
@@ -253,7 +253,7 @@ class FilteringPipeline:
         
         # Step 4: Extract Remaining Embeddings (ONLY FOR APPROVED IMAGES)
         # SigLIP already extracted, now get MobileNet, EfficientNet, DINOv3
-        logger.info(f"Approved {candidate.id} (score={ml_score.final_score:.3f}) - extracting embeddings")
+        logger.info(f"Approved {candidate.id} (score={ml_score.raw_aesthetic:.1f}/10) - extracting embeddings")
         embeddings = EmbeddingSet()
         embeddings.siglip = siglip_embedding
         embeddings.mobilenet_v4 = self.embedding_extractor.extract_mobilenet_v4(candidate.filepath)
@@ -313,7 +313,7 @@ class FilteringPipeline:
         Process all candidates through the filtering pipeline using THREE-PASS approach.
         
         Pass 1: Hard filters only (fast, no ML) - ALL candidates
-        Pass 2: ML quality scoring only (SigLIP + LAION) - ALL that passed hard filters
+        Pass 2: ML quality scoring only (Aesthetic V2.5) - ALL that passed hard filters
         Pass 3: Embedding extraction (MobileNet, EfficientNet, DINOv2) - APPROVED only
         
         This separation ensures:
@@ -370,7 +370,7 @@ class FilteringPipeline:
         logger.info(f"✅ Pass 1 complete: {len(passed_candidates)}/{len(candidates)} passed hard filters")
         
         # =====================================================================
-        # PASS 2: Quality Scoring ONLY (SigLIP + LAION) - No Embedding Extraction
+        # PASS 2: Quality Scoring ONLY (Aesthetic V2.5) - No Embedding Extraction
         # =====================================================================
         if not passed_candidates:
             logger.warning("No candidates passed hard filters!")
@@ -392,12 +392,12 @@ class FilteringPipeline:
                     source=candidate.source
                 )
                 
-                # Quality Check
-                if ml_score.final_score < self.quality_config.threshold:
+                # Quality Check (using raw_aesthetic on 1-10 scale)
+                if ml_score.raw_aesthetic < self.quality_config.threshold:
                     self.stats.rejected_quality_score += 1
                     self.hard_filters.reject_candidate(
                         candidate.filepath,
-                        f"Quality score {ml_score.final_score:.3f} < {self.quality_config.threshold}"
+                        f"Quality score {ml_score.raw_aesthetic:.1f}/10 < {self.quality_config.threshold}/10"
                     )
                     continue
                 
@@ -405,7 +405,7 @@ class FilteringPipeline:
                 
                 # Store for Pass 3 - DON'T extract other embeddings yet
                 quality_passed.append((candidate, filter_result, ml_score, siglip_embedding))
-                logger.info(f"✓ Approved {candidate.id} (score={ml_score.final_score:.3f})")
+                logger.info(f"✓ Approved {candidate.id} (score={ml_score.raw_aesthetic:.1f}/10)")
                 
             except Exception as e:
                 logger.error(f"Error scoring {candidate.id}: {e}")
@@ -539,7 +539,7 @@ def run_part2_pipeline(
     
     # Get quality threshold from central config if not specified
     if quality_threshold is None:
-        quality_threshold = get_config().get('quality.threshold', 0.40)
+        quality_threshold = get_config().get('quality.threshold', 5.5)
     
     config.quality_threshold = quality_threshold
     

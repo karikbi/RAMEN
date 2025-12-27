@@ -30,7 +30,7 @@ class QualityWeights:
 @dataclass
 class QualityConfig:
     """Quality scoring configuration."""
-    threshold: float = 0.40  # LAION + SigLIP hybrid scoring
+    threshold: float = 5.5  # Aesthetic V2.5 native 1-10 scale
     weights: QualityWeights = field(default_factory=QualityWeights)
 
 
@@ -202,7 +202,7 @@ class ConfigLoader:
             Configuration value or default
         
         Examples:
-            config.get('quality.threshold')  # 0.40
+            config.get('quality.threshold')  # 5.5 (1-10 scale)
             config.get('filters.min_width')  # 2560
             config.get('sources.reddit.enabled')  # True
         """
@@ -223,7 +223,7 @@ class ConfigLoader:
         weights_dict = quality.get("weights", {})
         
         return QualityConfig(
-            threshold=quality.get("threshold", 0.40),
+            threshold=quality.get("threshold", 5.5),
             weights=QualityWeights(
                 visual=weights_dict.get("visual", 0.40),
                 composition=weights_dict.get("composition", 0.30),

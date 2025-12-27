@@ -7,7 +7,7 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 
 ## Core Principles
 
-**Quality over quantity**: No fixed quotas. Accept only wallpapers scoring ≥0.85 (adjustable based on collection maturity)
+**Quality over quantity**: No fixed quotas. Accept only wallpapers scoring ≥5.5 on Aesthetic V2.5 (1-10 scale)
 
 **Automated curation**: GitHub Actions runs daily at 2 AM IST, zero manual work except weekly reviews
 
@@ -21,7 +21,7 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 
 ## The 4-Model System (V2 Stack)
 
-**MobileNetV4-Small** (960 dimensions, with 576D legacy projection)
+**MobileNetV4-Small** (1280 dimensions - timm includes 960→1280 projection layer)
 - Bridge between user uploads and better models
 - Enables Personalize Mode in Vanderwaals
 - 2× faster, +7% accuracy vs MobileNetV3
@@ -73,19 +73,19 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 
 ### Quality Score (Accept if ≥ Threshold)
 
-**Visual Quality (40%)**: Sharpness, exposure, color accuracy, no artifacts
+**Aesthetic Predictor V2.5** (Primary - 1-10 scale):
+- 6.5 - 10: Premium (feature in "Best")
+- 5.5 - 6.5: Standard (general catalog)
+- 4.0 - 5.5: Acceptable (lower priority)
+- < 4.0: Low (filter out)
 
-**Composition (30%)**: Rule of thirds, balance, depth, spatial arrangement
-
-**Aesthetic Appeal (20%)**: Color harmony, contrast, visual interest, mood
-
-**Wallpaper Suitability (10%)**: Off-center subject, appropriate brightness, works as background
+**Plus SigLIP checks** for technical quality and wallpaper suitability.
 
 **Thresholds adjust by collection phase**:
-- Early (0-1,000): 0.82 (build diverse foundation)
-- Growth (1,000-5,000): 0.85 (standard quality)
-- Mature (5,000-10,000): 0.87 (selective)
-- Rotation (10,000+): 0.90 (only exceptional additions)
+- Early (0-1,000): 5.0 (build diverse foundation)
+- Growth (1,000-5,000): 5.5 (standard quality)
+- Mature (5,000-10,000): 6.0 (selective)
+- Rotation (10,000+): 6.5 (only exceptional additions)
 
 **Daily acceptance varies naturally**: Some days 3 wallpapers pass, other days 40 pass. Quality is the only gatekeeper.
 
@@ -111,7 +111,7 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 - Extract embeddings from all 4 models (~5 seconds per wallpaper)
 - Generate metadata: color palettes, categories, scene tags
 - Composition analysis and final quality scoring
-- Result: Wallpapers scoring ≥0.85 approved for upload
+- Result: Wallpapers scoring ≥5.5/10 (Aesthetic V2.5) approved for upload
 
 **Stage 4: Upload** (3-5 min)
 - Batch upload approved wallpapers to Cloudflare R2 via rclone
@@ -173,25 +173,25 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 
 ### Phase 1: Foundation (Months 1-3)
 - Target: 1,500-2,000 wallpapers
-- Threshold: 0.82 (build diverse base)
+- Threshold: 5.0/10 (build diverse base)
 - Focus: Validate pipeline, tune filters
 - Typical: 10-20 accepted daily
 
 ### Phase 2: Expansion (Months 4-6)
 - Target: 5,000 wallpapers total
-- Threshold: 0.85 (standard quality)
+- Threshold: 5.5/10 (standard quality)
 - Focus: Add specialized sources, scale up candidates
 - Typical: 15-25 accepted daily
 
 ### Phase 3: Maturity (Months 7-12)
 - Target: 8,000-10,000 wallpapers
-- Threshold: 0.87 (selective)
+- Threshold: 6.0/10 (selective)
 - Focus: Quarterly rotation, text search feature
 - Typical: 12-18 accepted daily
 
 ### Phase 4: Living Collection (Year 2+)
 - Target: 10,000-15,000 maintained
-- Threshold: 0.90 (exceptional only)
+- Threshold: 6.5/10 (exceptional only)
 - Focus: Replace low-performers, community-driven
 - Add new while removing old (net stable size)
 
@@ -270,7 +270,7 @@ Build a 10,000-15,000 exceptional wallpaper collection with 4-model embeddings a
 ## Success Metrics
 
 ### Collection Health (Weekly Monitoring)
-- Average quality score (should stay ≥0.86)
+- Average quality score (should stay ≥6.0/10 on V2.5)
 - Category balance (no category >35% or <5%)
 - Source acceptance rates (optimize allocation)
 - Diversity score (embeddings spread across space)

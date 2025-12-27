@@ -3,7 +3,7 @@
 Wallpaper Curation Pipeline - Part 2: Embedding Extraction
 
 Extracts embeddings from 4 models:
-- MobileNetV4-Small (960D) - primary embedding model
+- MobileNetV4-Small (1280D) - fast device compatibility (timm includes 960->1280 projection)
 - EfficientNetV2-Large (1280D) - visual similarity
 - SigLIP 2 Large (1152D) - semantic understanding
 - DINOv3-Large (1024D) - scene composition
@@ -57,14 +57,14 @@ HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"
 @dataclass
 class EmbeddingSet:
     """Container for all model embeddings (V2 stack with backward compatibility)."""
-    # MobileNetV4-Small: 960-dim primary embedding
-    mobilenet_v4: Optional[np.ndarray] = None  # 960-dim, int8
+    # MobileNetV4-Small: 1280-dim (timm includes projection layer from backbone's 960)
+    mobilenet_v4: Optional[np.ndarray] = None  # 1280-dim, int8
     efficientnet_v2: Optional[np.ndarray] = None  # 1280-dim, int8
     siglip: Optional[np.ndarray] = None  # 1152-dim, float16 (now SigLIP 2)
     dinov2: Optional[np.ndarray] = None  # 1024-dim, int8 (legacy alias)
     dinov3: Optional[np.ndarray] = None  # 1024-dim, int8 (NEW)
     
-    mobilenet_v4_dim: int = 960
+    mobilenet_v4_dim: int = 1280  # timm outputs 1280 (960->1280 projection included)
     efficientnet_v2_dim: int = 1280
     siglip_dim: int = 1152
     dinov3_dim: int = 1024
@@ -107,8 +107,7 @@ class EmbeddingExtractor:
         logger.info(f"Using device: {self.device}")
         
         # Lazy-loaded models
-        self._mobilenet_v4 = None  # MobileNetV4-Small (timm)
-        self._mobilenet_v4_projection_960 = None  # 1280->960 projection
+        self._mobilenet_v4 = None  # MobileNetV4-Small (timm) - outputs 1280-dim
 
         self._mobilenet = None  # Legacy MobileNetV3 (TensorFlow)
         self._efficientnet = None
@@ -173,11 +172,18 @@ class EmbeddingExtractor:
         return self._ensure_image(filepath, size)
     
     # =========================================================================
-    # MOBILENET V4 (960-dim)
+    # MOBILENET V4 (1280-dim) - timm includes 960->1280 projection layer
     # =========================================================================
     
     def _load_mobilenet_v4(self):
-        """Load MobileNetV4-Small model from timm."""
+        """
+        Load MobileNetV4-Small model from timm.
+        
+        Note: timm's MobileNetV4-Conv-Small outputs 1280-dim, not 960-dim.
+        The backbone ends at 960 channels, but timm includes the final 1x1 
+        projection layer (960->1280) as part of the pre-logits output when 
+        num_classes=0. This is the expected behavior.
+        """
         if self._mobilenet_v4 is None:
             try:
                 import timm
@@ -197,9 +203,7 @@ class EmbeddingExtractor:
                 
                 self._mobilenet_v4.eval()
                 
-                # CRITICAL: Detect actual model output dimensions
-                # MobileNetV4-Conv-Small SHOULD output 960-dim, but we've observed 1280-dim
-                # Possible causes: wrong variant, timm version issue, or checkpoint mismatch
+                # Verify expected 1280-dim output
                 with torch.no_grad():
                     test_input = torch.randn(1, 3, 224, 224)
                     if self.device == "cuda":
@@ -208,58 +212,29 @@ class EmbeddingExtractor:
                         test_input = test_input.to("mps")
                     test_output = self._mobilenet_v4(test_input)
                     actual_dim = test_output.shape[1]
-                    logger.info(f"MobileNetV4 actual output dimension: {actual_dim}")
                 
-                # Adaptive projection layer creation based on actual dimensions
-                if actual_dim == 960:
-                    # EXPECTED: MobileNetV4-Conv-Small outputs 960-dim
-                    logger.info("✓ MobileNetV4 dimensions correct (960)")
-                    self._mobilenet_v4_projection_960 = None  # No projection needed
-                    self._mobilenet_v4_actual_dim = 960
-                    logger.info("Loaded MobileNetV4-Small (960D, no projection needed)")
-                    
-                elif actual_dim == 1280:
-                    # UNEXPECTED: Getting 1280-dim (possibly wrong variant or timm issue)
+                if actual_dim != 1280:
                     logger.warning(
-                        f"⚠️  MobileNetV4 dimension mismatch! "
-                        f"Expected 960-dim for Conv-Small, got {actual_dim}-dim. "
-                        f"Possible causes: (1) Wrong model variant loaded, "
-                        f"(2) timm version issue, (3) Checkpoint mismatch. "
-                        f"Creating adaptive 1280->960 projection."
+                        f"MobileNetV4 output dimension {actual_dim} differs from expected 1280. "
+                        f"This may indicate a timm version difference."
                     )
-                    # Single-stage projection: 1280->960
-                    self._mobilenet_v4_projection_960 = torch.nn.Linear(1280, 960)
-                    
-                    with torch.no_grad():
-                        self._mobilenet_v4_projection_960.weight.data = torch.eye(960, 1280)
-                        self._mobilenet_v4_projection_960.bias.data.zero_()
-                    
-                    if self.device == "cuda":
-                        self._mobilenet_v4_projection_960 = self._mobilenet_v4_projection_960.cuda()
-                    elif self.device == "mps":
-                        self._mobilenet_v4_projection_960 = self._mobilenet_v4_projection_960.to("mps")
-                    
-                    self._mobilenet_v4_actual_dim = 1280
-                    logger.info("Loaded MobileNetV4-Small (1280D -> 960D projection)")
-                    
-                else:
-                    # CRITICAL ERROR: Unexpected dimension
-                    raise ValueError(
-                        f"MobileNetV4 output dimension {actual_dim} is neither 960 nor 1280! "
-                        f"Model: {model_name}. This requires manual investigation."
-                    )
+                
+                logger.info(f"Loaded MobileNetV4-Small ({actual_dim}D)")
+                
             except Exception as e:
                 logger.error(f"Failed to load MobileNetV4: {e}")
-        return self._mobilenet_v4, self._mobilenet_v4_projection_960, getattr(self, '_mobilenet_v4_actual_dim', 1280)
+        return self._mobilenet_v4
     
     def extract_mobilenet_v4(self, input_data: Union[str, Path, Image.Image]) -> Optional[np.ndarray]:
         """
-        Extract MobileNetV4 embeddings (960-dim).
+        Extract MobileNetV4 embeddings (1280-dim).
+        
+        Note: timm outputs 1280-dim (includes projection layer from backbone's 960).
         
         Returns:
-            960-dim int8 embedding or None if extraction fails
+            1280-dim int8 embedding or None if extraction fails
         """
-        model, projection_960, actual_dim = self._load_mobilenet_v4()
+        model = self._load_mobilenet_v4()
         if model is None:
             return None
         
@@ -281,22 +256,11 @@ class EmbeddingExtractor:
                 img_tensor = img_tensor.to("mps")
             
             with torch.no_grad():
-                embedding_raw = model(img_tensor)
-                
-                # Adaptive projection based on actual dimensions
-                if actual_dim == 960:
-                    # No projection needed
-                    embedding_960 = embedding_raw
-                elif actual_dim == 1280:
-                    # Single-stage 1280->960 projection
-                    embedding_960 = projection_960(embedding_raw)
-                else:
-                    logger.error(f"Unexpected dimension {actual_dim} during extraction")
-                    return None
+                embedding = model(img_tensor)
             
-            emb_960 = embedding_960.cpu().numpy()[0]
+            embedding_np = embedding.cpu().numpy()[0]
             
-            return self._quantize_int8(emb_960)
+            return self._quantize_int8(embedding_np)
         except Exception as e:
             logger.error(f"MobileNetV4 extraction failed: {e}")
             logger.debug(f"MobileNetV4 extraction error details:", exc_info=True)
@@ -674,7 +638,7 @@ class EmbeddingExtractor:
         
         logger.debug(f"Extracting embeddings for {filepath}")
         
-        # MobileNetV4 (960-dim)
+        # MobileNetV4 (1280-dim)
         embeddings.mobilenet_v4 = self.extract_mobilenet_v4(filepath)
         
         # EfficientNetV2 (1280-dim)
@@ -715,7 +679,7 @@ class EmbeddingExtractor:
                 # Force load into memory to allow closing file
                 img.load()
                 
-                # MobileNetV4 (960-dim)
+                # MobileNetV4 (1280-dim)
                 embeddings.mobilenet_v4 = self.extract_mobilenet_v4(img)
                 
                 # EfficientNetV2 (1280-dim)
@@ -817,7 +781,6 @@ class EmbeddingExtractor:
         
         # V2 stack
         self._mobilenet_v4 = None
-        self._mobilenet_v4_projection_960 = None
 
         self._dinov3_model = None
         self._dinov3_processor = None

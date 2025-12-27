@@ -640,7 +640,7 @@ class DataValidator:
     """
     
     EMBEDDING_DIMENSIONS = {
-        "mobilenet_v4": 960,
+        "mobilenet_v4": 1280,
         "efficientnet_v2": 1280,
         "siglip": 1152,
         "dinov2": 1024

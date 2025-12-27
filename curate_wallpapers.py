@@ -67,9 +67,9 @@ class Config:
     r2_secret_key: str = field(default_factory=lambda: os.getenv("R2_SECRET_KEY", ""))
     r2_bucket_name: str = field(default_factory=lambda: os.getenv("R2_BUCKET_NAME", ""))
     
-    # Quality thresholds (read from central config.yaml)
+    # Quality thresholds (read from central config.yaml, 1-10 scale)
     quality_threshold: float = field(default_factory=lambda: 
-        get_central_config().get('quality.threshold', 0.40) if HAS_CONFIG_LOADER else 0.40
+        get_central_config().get('quality.threshold', 5.5) if HAS_CONFIG_LOADER else 5.5
     )
     
     # Subreddit configurations - lowered upvote requirements for more candidates

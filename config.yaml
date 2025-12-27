@@ -12,18 +12,17 @@
 # Quality Scoring Configuration
 # -----------------------------------------------------------------------------
 quality:
-  # Minimum score to approve a wallpaper (0.0-1.0 normalized scale)
-  # Aesthetic Predictor V2.5 (SigLIP-based) + SigLIP hybrid scoring
-  # V2.5 uses 1-10 scale: 5.5+ is good quality (0.61 normalized)
+  # Minimum score to approve a wallpaper (1-10 universal scale)
+  # Uses Aesthetic Predictor V2.5's native 1-10 scoring system:
   # 
-  # Quality Tiers (V2.5 raw scores):
+  # Quality Tiers:
   #   6.5-10: Premium (show first, feature in "Best")
   #   5.5-6.5: Standard (general catalog)
   #   4.0-5.5: Acceptable (lower priority)
-  #   <4.0: Low (filter out or "All" category only)
+  #   <4.0: Low (filter out)
   # 
   # This is the SINGLE SOURCE OF TRUTH - all scripts read from here
-  threshold: 0.61
+  threshold: 5.5
 
   
   # Component weights (must sum to 1.0)
@@ -148,7 +147,7 @@ models:
   
   # Models to use for embedding extraction (V2 stack)
   enabled:
-    - mobilenet_v4      # 960-dim, fast (MobileNetV4-Small with 576D legacy projection)
+    - mobilenet_v4      # 1280-dim, fast (MobileNetV4-Small, timm includes projection)
     - efficientnet_v2   # 1280-dim, high quality visual similarity
     - siglip            # 1152-dim, semantic understanding (SigLIP 2)
     - dinov3            # 1024-dim, scene composition (DINOv3-Large)
