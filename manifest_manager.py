@@ -108,83 +108,118 @@ class ManifestManager:
         r2_url: str = ""
     ) -> dict[str, Any]:
         """
-        Create a manifest entry for a wallpaper.
+        Create an optimized manifest entry for a wallpaper.
+        
+        Optimizations applied:
+        - Short key names (cat, qs, hue, etc.) - saves ~40% on keys
+        - Arrays instead of objects for dimensions [w, h]
+        - Removed duplicate fields (category/primary_category)
+        - Omit empty/null values
+        - Unix timestamp for dates
+        - Short embedding keys (mn4, en2, sig, din)
         
         Args:
             wallpaper: ApprovedWallpaper object.
             r2_url: R2 storage URL if uploaded.
         
         Returns:
-            Dictionary representing manifest entry.
-        
-        Note:
-            All values are converted to native Python types via _to_native()
-            to ensure JSON serialization works correctly (no numpy float32 errors).
+            Dictionary representing optimized manifest entry.
         """
         meta = wallpaper.metadata
         embeddings = wallpaper.embeddings
         
-        return {
+        # Base entry with short keys
+        entry = {
             "id": wallpaper.id,
-            "title": wallpaper.title,
-            "url": r2_url or str(wallpaper.filepath),
-            "r2_url": r2_url or "",  # Explicit R2 URL for validation
-            "category": meta.primary_category,
-            "primary_category": meta.primary_category,  # Explicit for validation
-            "subcategories": meta.subcategories,
+            "t": wallpaper.title,  # title
+            "cat": meta.primary_category,  # category
+            "src": wallpaper.source,  # source
+            "ts": int(datetime.now().timestamp()),  # timestamp (unix)
             
-            # Color analysis - convert numpy types
-            "colors": meta.color_palette,
-            "dominant_hue": self._to_native(meta.dominant_hue),
-            "color_diversity": round(float(self._to_native(meta.color_diversity)), 3),
-            "brightness": self._to_native(meta.brightness),
-            "contrast": round(float(self._to_native(meta.contrast_ratio)), 2),
-            "is_dark_mode_friendly": self._to_native(meta.is_dark_mode_friendly),
+            # Dimensions as array [width, height] - saves ~20 bytes per entry
+            "dim": [self._to_native(meta.width), self._to_native(meta.height)],
+            "ar": round(float(self._to_native(meta.aspect_ratio)), 2),  # aspect_ratio
+            "sz": self._to_native(meta.file_size),  # file_size
             
-            # Quality metrics - convert numpy types
-            "quality_score": round(float(self._to_native(wallpaper.quality_scores.final_score)), 4),
-            "quality_tier": meta.quality_tier,
-            "aesthetic_score": round(float(self._to_native(meta.aesthetic_score)), 2),
+            # Quality (short keys)
+            "qs": round(float(self._to_native(wallpaper.quality_scores.final_score)), 3),  # quality_score
+            "qt": meta.quality_tier,  # quality_tier
+            "aes": round(float(self._to_native(meta.aesthetic_score)), 1),  # aesthetic
             
-            # ML classification metadata - convert numpy types
-            "ml_category": meta.ml_category,
-            "ml_confidence": round(float(self._to_native(meta.ml_confidence)), 3),
+            # Colors (short keys)
+            "col": meta.color_palette,  # colors
+            "hue": self._to_native(meta.dominant_hue),  # dominant_hue
+            "bri": self._to_native(meta.brightness),  # brightness
+            "ctr": round(float(self._to_native(meta.contrast_ratio)), 1),  # contrast
+            "dark": self._to_native(meta.is_dark_mode_friendly),  # is_dark_mode_friendly
             
-            "dimensions": {
-                "width": self._to_native(meta.width),
-                "height": self._to_native(meta.height)
+            # Composition as compact object
+            "comp": {
+                "t": meta.composition_type,  # type
+                "s": round(float(self._to_native(meta.symmetry_score)), 2),  # symmetry
+                "d": round(float(self._to_native(meta.depth_score)), 1),  # depth
+                "c": meta.complexity_level,  # complexity
+                "fp": self._safe_focal_point(meta.focal_point),  # focal_point
             },
-            "aspect_ratio": round(float(self._to_native(meta.aspect_ratio)), 2),
-            "file_size": self._to_native(meta.file_size),
-            "date_added": datetime.now().isoformat() + "Z",
-            "source": wallpaper.source,
-            "source_metadata": {
-                "subreddit": meta.subreddit,
-                "upvotes": self._to_native(meta.upvotes),
-                "post_url": meta.post_url,
-                "source_url": meta.source_url,
+            
+            # Tags (already short)
+            "mood": meta.mood_tags,
+            "style": meta.style_tags,
+            
+            # Embeddings with short keys
+            "emb": {
+                "mn4": self._encode_embedding(embeddings.mobilenet_v4),  # mobilenet_v4
+                "en2": self._encode_embedding(embeddings.efficientnet_v2),  # efficientnet_v2
+                "sig": self._encode_embedding(embeddings.siglip),  # siglip
+                "din": self._encode_embedding(embeddings.dinov3),  # dinov3
             },
-            "artist": wallpaper.artist,
-            "artist_url": meta.artist_url,
-            "license": meta.license_type,
-            "embeddings": {
-                "mobilenet_v4": self._encode_embedding(embeddings.mobilenet_v4),
-                "efficientnet_v2": self._encode_embedding(embeddings.efficientnet_v2),
-                "siglip": self._encode_embedding(embeddings.siglip),
-                "dinov3": self._encode_embedding(embeddings.dinov3),
-            },
-            "composition": {
-                "type": meta.composition_type,
-                "symmetry": round(float(self._to_native(meta.symmetry_score)), 2),
-                "depth": round(float(self._to_native(meta.depth_score)), 2),
-                "complexity": meta.complexity_level,
-                "focal_point": self._safe_focal_point(meta.focal_point),
-                "focal_point_method": meta.focal_point_method,
-            },
-            "mood_tags": meta.mood_tags,
-            "style_tags": meta.style_tags,
-            "metadata_version": "1.1"  # Version for new fields
+            
+            "v": 2  # manifest version (short)
         }
+        
+        # URL - only include if exists (save bytes on empty strings)
+        if r2_url:
+            entry["url"] = r2_url
+        elif wallpaper.filepath:
+            entry["url"] = str(wallpaper.filepath)
+        
+        # Subcategories - only if non-empty
+        if meta.subcategories:
+            entry["sub"] = meta.subcategories
+        
+        # ML category - only if different from primary
+        if meta.ml_category and meta.ml_category != meta.primary_category:
+            entry["mlc"] = meta.ml_category
+            entry["mlcf"] = round(float(self._to_native(meta.ml_confidence)), 2)
+        
+        # Source metadata - only include non-empty values
+        src_meta = {}
+        if meta.subreddit:
+            src_meta["sr"] = meta.subreddit
+        if self._to_native(meta.upvotes):
+            src_meta["up"] = self._to_native(meta.upvotes)
+        if meta.post_url:
+            src_meta["pu"] = meta.post_url
+        if meta.source_url:
+            src_meta["su"] = meta.source_url
+        if src_meta:
+            entry["srcm"] = src_meta
+        
+        # Artist - only if known
+        if wallpaper.artist and wallpaper.artist.lower() not in ["unknown", ""]:
+            entry["art"] = wallpaper.artist
+            if meta.artist_url:
+                entry["artu"] = meta.artist_url
+        
+        # License - only if specified
+        if meta.license_type:
+            entry["lic"] = meta.license_type
+        
+        # Color diversity - only if meaningful
+        if meta.color_diversity and self._to_native(meta.color_diversity) > 0:
+            entry["cdiv"] = round(float(self._to_native(meta.color_diversity)), 2)
+        
+        return entry
     
     def load_collection(self) -> list[dict]:
         """Load existing collection from manifest file."""
@@ -242,87 +277,129 @@ class ManifestManager:
                 logger.error(f"Failed to upload manifest to R2: {e}")
                 # Continue - local save succeeded
     
-    def save_delta(self, new_entries: list[dict]) -> Path:
-        """Save delta file with only new entries."""
-        date_str = datetime.now().strftime("%Y_%m_%d")
-        delta_filename = f"delta_{date_str}.json"
-        delta_path = self.config.manifests_dir / delta_filename
+    def _get_next_manifest_filename(self, date_str: str, test_mode: bool = False) -> str:
+        """
+        Get the next available manifest filename for today.
         
-        delta = {
-            "version": "1.0",
+        Uses run numbering: date.json.gz, date-2.json.gz, date-3.json.gz, etc.
+        For test mode: test_date.json.gz, test_date-2.json.gz, etc.
+        """
+        prefix = "test_" if test_mode else ""
+        base_name = f"{prefix}{date_str}"
+        ext = ".json.gz" if self.config.compressed else ".json"
+        
+        # Check if base file exists
+        first_file = self.config.manifests_dir / f"{base_name}{ext}"
+        if not first_file.exists():
+            return f"{base_name}{ext}"
+        
+        # Find next available run number
+        run_num = 2
+        while True:
+            filename = f"{base_name}-{run_num}{ext}"
+            if not (self.config.manifests_dir / filename).exists():
+                return filename
+            run_num += 1
+            # Safety limit
+            if run_num > 100:
+                logger.warning(f"Too many manifest files for {date_str}, overwriting last")
+                return filename
+    
+    def _save_date_manifest(
+        self, 
+        date_str: str, 
+        wallpapers: list[dict],
+        test_mode: bool = False
+    ) -> Path:
+        """
+        Save manifest for a specific date with run numbering.
+        
+        Creates new file for each run: date.json.gz, date-2.json.gz, etc.
+        Test runs use prefix: test_date.json.gz
+        """
+        manifest_filename = self._get_next_manifest_filename(date_str, test_mode)
+        manifest_path = self.config.manifests_dir / manifest_filename
+        
+        manifest = {
+            "version": "1.2",
+            "date": date_str,
             "created": datetime.now().isoformat() + "Z",
-            "count": len(new_entries),
-            "wallpapers": new_entries
+            "count": len(wallpapers),
+            "is_test": test_mode,
+            "wallpapers": wallpapers
         }
         
-        # Compress delta files too
         if self.config.compressed:
-            delta_path = delta_path.with_suffix(".json.gz")
-            with gzip.open(delta_path, "wt", encoding="utf-8") as f:
-                json.dump(delta, f)
+            with gzip.open(manifest_path, "wt", encoding="utf-8") as f:
+                json.dump(manifest, f)
         else:
-            with open(delta_path, "w") as f:
-                json.dump(delta, f, indent=2)
+            with open(manifest_path, "w") as f:
+                json.dump(manifest, f, indent=2)
         
-        logger.info(f"Saved delta file: {delta_path}")
-        return delta_path
+        mode_label = "🧪 TEST" if test_mode else "📅"
+        logger.info(f"{mode_label} Saved manifest: {manifest_path} ({len(wallpapers)} wallpapers)")
+        return manifest_path
     
     def update_manifest(
         self,
         approved_wallpapers: list,  # List of ApprovedWallpaper
-        r2_urls: dict[str, str] = None
+        r2_urls: dict[str, str] = None,
+        test_mode: bool = False
     ) -> tuple[int, Path]:
         """
-        Update manifest with new approved wallpapers.
+        Update manifest with new approved wallpapers using date-wise storage.
+        
+        Each pipeline run creates a new file:
+        - Production: 2025_12_28.json.gz, 2025_12_28-2.json.gz, etc.
+        - Test mode:  test_2025_12_28.json.gz, test_2025_12_28-2.json.gz, etc.
+        
+        This avoids:
+        - Override issues in CI/CD (each run has its own file)
+        - Heavy file loading/merging (no need to load existing data)
+        - Test data mixing with production data
         
         Args:
             approved_wallpapers: List of ApprovedWallpaper objects.
             r2_urls: Optional mapping of wallpaper_id to R2 URL.
+            test_mode: If True, prefix filename with "test_".
         
         Returns:
-            Tuple of (number of new entries, delta file path).
+            Tuple of (number of entries, manifest file path).
         """
         if r2_urls is None:
             r2_urls = {}
         
-        # Load existing collection
-        existing = self.load_collection()
-        existing_ids = {w["id"] for w in existing}
-        
-        # Create new entries
-        new_entries = []
-        for wp in approved_wallpapers:
-            if wp.id not in existing_ids:
-                r2_url = r2_urls.get(wp.id, "")
-                entry = self._create_manifest_entry(wp, r2_url)
-                new_entries.append(entry)
-        
-        if not new_entries:
-            logger.info("No new wallpapers to add to manifest")
+        if not approved_wallpapers:
+            logger.info("No wallpapers to add to manifest")
             return 0, Path()
         
-        # Combine and save
-        all_wallpapers = new_entries + existing
-        self.save_collection(all_wallpapers)
+        # Create entries for all approved wallpapers
+        entries = []
+        for wp in approved_wallpapers:
+            r2_url = r2_urls.get(wp.id, "")
+            entry = self._create_manifest_entry(wp, r2_url)
+            entries.append(entry)
         
-        # Save delta
-        delta_path = self.save_delta(new_entries)
+        # Save to new date-wise file (with run numbering)
+        date_str = datetime.now().strftime("%Y_%m_%d")
+        manifest_path = self._save_date_manifest(date_str, entries, test_mode)
         
-        # Upload delta to R2 if configured
-        if self.r2_manager and delta_path.exists():
+        # Upload to R2 if configured (skip for test mode)
+        if self.r2_manager and manifest_path.exists() and not test_mode:
             try:
-                self.r2_manager.upload_delta(delta_path)
+                self.r2_manager.upload_manifest(manifest_path)
+                logger.info(f"📤 Manifest synced to R2")
             except Exception as e:
-                logger.warning(f"Failed to upload delta to R2: {e}")
+                logger.warning(f"Failed to upload manifest to R2: {e}")
         
-        # Update dedup index with new IDs
-        if self.dedup_index:
+        # Update dedup index with new IDs (skip for test mode)
+        if self.dedup_index and not test_mode:
             for wp in approved_wallpapers:
                 self.dedup_index.add_id(wp.id)
         
-        logger.info(f"Added {len(new_entries)} new wallpapers to manifest")
+        logger.info(f"✅ Added {len(entries)} wallpapers to manifest")
         
-        return len(new_entries), delta_path
+        return len(entries), manifest_path
 
 
 class HashManager:

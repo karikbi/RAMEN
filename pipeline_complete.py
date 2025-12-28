@@ -337,7 +337,9 @@ class WallpaperCurationPipeline:
         
         # Update manifest (will also sync to R2 if configured)
         logger.info("\n📝 Updating manifest...")
-        new_count, delta_path = self.manifest_manager.update_manifest(approved, r2_urls)
+        new_count, manifest_path = self.manifest_manager.update_manifest(
+            approved, r2_urls, test_mode=self.test_mode
+        )
         
         # Update perceptual hashes
         logger.info("🔐 Updating perceptual hashes...")

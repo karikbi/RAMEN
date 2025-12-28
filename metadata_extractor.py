@@ -31,12 +31,19 @@ logger = logging.getLogger("wallpaper_curator")
 # =============================================================================
 
 CATEGORY_VOCABULARY = {
-    # Natural & Landscapes
+    # Natural & Landscapes (General)
     "nature": "a photo of a natural landscape with mountains, forests, oceans, or rivers",
     "space": "a photo of outer space showing galaxies, stars, planets, or nebulae",
     "animals": "a photo featuring animals, wildlife, birds, or creatures in their habitat",
     "underwater": "an underwater photo of the ocean depths, marine life, or coral reefs",
     "aerial": "an aerial view photo taken from a drone or bird's eye perspective",
+    
+    # Landscape-Specific
+    "mountains": "towering mountain peaks with snow caps, alpine valleys, dramatic ridgelines",
+    "beach": "sandy beach shoreline with ocean waves, palm trees, coastal sunset",
+    "forest": "dense woodland with tall trees, forest path, dappled sunlight through canopy",
+    "desert": "arid sand dunes, barren desert landscape, cacti, dry cracked earth",
+    "ocean": "vast open ocean seascape, rolling waves, deep blue water horizon",
     
     # Urban & Architecture
     "urban": "a photo of a city skyline, urban street, or metropolitan architecture",
@@ -48,15 +55,37 @@ CATEGORY_VOCABULARY = {
     "minimalist": "a minimalist image with simple composition and negative space",
     "art": "a piece of digital art, illustration, painting, or concept art",
     "anime": "an anime or manga style illustration with japanese animation aesthetics",
-    "vintage": "an image with a vintage, retro, or old-fashioned aesthetic",
+    "vintage": "photo with Kodak film grain texture, 1970s faded color grading, light leaks, and analog camera vignetting",
+    
+    # Photography Styles
+    "macro": "extreme close-up macro photography of tiny subjects, insects, water droplets, textures",
+    "portrait": "portrait photography with shallow depth of field, face or figure as subject",
+    "long_exposure": "long exposure photography with light trails, smooth water, star trails, motion blur",
+    "bokeh": "dreamy bokeh background with circular blurred lights, shallow depth of field",
     
     # Technology & Gaming
     "technology": "a futuristic image with cyberpunk, neon, or sci-fi technology themes",
     "gaming": "a video game screenshot or gaming-related digital artwork",
     
-    # Themes & Moods
+    # Themes
     "dark": "a dark, low-key image suitable for AMOLED screens with black backgrounds",
     "colorful": "a vibrant, highly saturated image with bright rainbow colors",
+    "fantasy": "magical fantasy scene with dragons, castles, wizards, mythical creatures",
+    "horror": "dark eerie horror aesthetic, haunted atmosphere, creepy shadows, fog",
+    "romantic": "romantic dreamy scene, couples silhouette, sunset, roses, soft lighting",
+    "sports": "dynamic sports action photography, athletes in motion, stadium, competition",
+    
+    # Cultural & Places
+    "japanese": "japanese aesthetic with cherry blossoms, torii gates, temples, zen gardens",
+    "european": "european architecture, cobblestone streets, historic buildings, cathedrals",
+    "tropical": "lush tropical paradise with palm trees, exotic flowers, turquoise water",
+    "nordic": "scandinavian nordic landscape, fjords, aurora borealis, snow, pine forests",
+    
+    # Modern Aesthetics
+    "neon": "neon lights and signs glowing in darkness, vibrant electric colors",
+    "gradient": "smooth color gradient background, soft color transitions, abstract blend",
+    "3d_render": "3D rendered digital art, CGI scene, geometric shapes, modern 3D graphics",
+    "vector": "flat vector art illustration, clean lines, bold shapes, graphic design style",
     
     # Seasonal & Weather
     "seasonal": "a seasonal image showing spring, summer, autumn leaves, or winter snow",
@@ -64,30 +93,74 @@ CATEGORY_VOCABULARY = {
 }
 
 MOOD_VOCABULARY = {
-    "calm": "calm peaceful serene wallpaper scene",
-    "dramatic": "dramatic intense moody wallpaper with strong contrast",
-    "mysterious": "mysterious dark enigmatic wallpaper atmosphere",
-    "energetic": "vibrant energetic dynamic colorful wallpaper",
-    "romantic": "romantic soft dreamy wallpaper with warm tones",
-    "melancholic": "melancholic sad lonely wallpaper with muted colors",
-    "inspiring": "inspiring uplifting hopeful wallpaper scene",
-    "cozy": "cozy warm comfortable wallpaper atmosphere",
-    "epic": "epic grand majestic wallpaper landscape",
-    "surreal": "surreal dreamlike fantastical wallpaper scene",
+    # Visually-specific prompts to reduce false positives
+    # Each prompt describes concrete visual elements, not abstract feelings
+    "calm": "a serene still lake at dawn with soft pastel sky reflections and gentle mist",
+    "dramatic": "stormy sky with dark clouds, dramatic chiaroscuro lighting, high contrast shadows",
+    "mysterious": "misty foggy forest with obscured paths, dim twilight, silhouettes in haze",
+    "energetic": "explosive colorful abstract with dynamic motion blur, flying particles, vibrant streaks",
+    "romantic": "soft bokeh sunset with warm golden pink hues, cherry blossoms, dreamy soft focus",
+    "melancholic": "lonely figure in rain, desaturated muted tones, overcast grey sky, empty landscapes",
+    "inspiring": "golden sunrise breaking through mountain peaks, rays of light through clouds",
+    "cozy": "warm fireplace glow, cabin interior with soft warm lighting, autumn leaves",
+    "epic": "vast cinematic wide-angle landscape with towering mountains, god rays through dramatic storm clouds at golden hour",
+    "surreal": "impossible architecture, melting clocks, floating objects, dreamlike impossible physics",
+    # New moods with specific visual anchors
+    "serene": "zen garden with raked sand, still pond with koi fish, bamboo and minimalist stones",
+    "nostalgic": "vintage polaroid aesthetic, faded family photos, old toys, warm sepia childhood memories",
+    "adventurous": "winding mountain road, vast open horizons, explorer at cliff edge, untamed wilderness",
+    "dark": "noir shadows, low-key lighting, silhouettes against dim light, moody atmospheric black",
+    "whimsical": "fairy-tale mushroom forest, floating lanterns, magical creatures, enchanted playful fantasy",
+    "futuristic": "sleek sci-fi architecture, holographic displays, floating vehicles, chrome and glass metropolis",
 }
 
 STYLE_VOCABULARY = {
-    "nord": "cool blue gray nordic wallpaper palette",
-    "gruvbox": "retro orange brown warm wallpaper palette",
-    "dracula": "dark purple vampire themed wallpaper",
-    "monokai": "dark wallpaper with vibrant accent colors",
-    "solarized": "warm yellow blue balanced wallpaper palette",
-    "catppuccin": "pastel soft colors wallpaper palette",
-    "cyberpunk": "cyberpunk neon lights futuristic city wallpaper",
-    "vaporwave": "vaporwave retro pink purple aesthetic wallpaper",
-    "minimalist": "minimalist simple clean wallpaper with negative space",
-    "vintage": "vintage retro wallpaper with film grain and faded colors",
-    "natural": "natural organic earthy green brown wallpaper",
+    # Color-grounded prompts with specific hex values and visual descriptions
+    # Developer theme names need explicit color palettes to avoid semantic ambiguity
+    "nord": "arctic frost palette with dark polar night #2e3440 background, aurora blue #5e81ac accents, snow white highlights",
+    "gruvbox": "retro warm palette with dark ebony #282828 background, bright orange #d65d0e and cream yellow #fabd2f accents",
+    "dracula": "dark purple #282a36 background with neon pink #ff79c6, cyan #8be9fd, and green #50fa7b accent colors",
+    "monokai": "charcoal black #272822 background with bright orange #fd971f, yellow #e6db74, magenta #f92672 accents",
+    "solarized": "blue-yellow balanced palette with teal #2aa198, orange #cb4b16, base16 background tones",
+    "catppuccin": "muted mauve pink #cba6f7, lavender #b4befe, soft rosewater #f5e0dc on dark macchiato background",
+    "cyberpunk": "neon city at night with hot pink, electric blue, purple neon glow against dark urban",
+    "vaporwave": "1980s retro aesthetics with hot pink, cyan, palm trees, sunset gradient, grid floor",
+    "minimalist": "clean single subject on solid background, extreme negative space, simple geometric shapes",
+    "vintage": "faded film grain, sepia tones, cross-processed colors, light leaks, old photograph look",
+    "natural": "forest greens, earthy browns, organic textures, moss, wood grain, natural lighting",
+    # New styles with distinctive visual identities
+    "tokyo": "japanese neon-lit streets at night, kanji signs, rain-slicked pavement, anime aesthetic cityscape",
+    "scandinavian": "clean nordic interior, white walls, hygge warmth, natural wood, minimalist cozy design",
+    "brutalist": "raw exposed concrete architecture, stark geometric shapes, monolithic grey structures",
+    "film_noir": "black and white high contrast, venetian blind shadows, detective aesthetic, cigarette smoke",
+    "synthwave": "80s retro-futurism, neon pink and blue grid, chrome sun, digital landscape, outrun aesthetic",
+    "cottagecore": "rustic countryside cottage, wildflower meadows, cozy farmhouse kitchen, floral patterns",
+    "dark_academia": "old leather-bound library, classical architecture, candlelight, scholarly gothic aesthetic",
+}
+
+# =============================================================================
+# LABEL SPECIFICITY PENALTIES
+# =============================================================================
+# Labels that historically over-match due to semantic breadth.
+# Apply multiplier to raw scores to reduce false positive rates.
+# 1.0 = no penalty, 0.5 = 50% score reduction
+
+LABEL_SPECIFICITY_PENALTIES = {
+    # Moods - vague emotional terms that match many images
+    "epic": 0.65,        # 35% penalty - was matching 97% of images
+    "inspiring": 0.75,   # 25% penalty - was matching 41% of images
+    "mysterious": 0.80,  # 20% penalty - was matching 29% of images
+    
+    # Styles - developer theme names with weak visual grounding
+    "dracula": 0.55,     # 45% penalty - was matching 62% of images
+    "catppuccin": 0.55,  # 45% penalty - was matching 59% of images
+    "monokai": 0.65,     # 35% penalty - was matching 41% of images
+}
+
+# Categories that tend to win low-confidence classifications
+# Apply penalty BEFORE softmax so they compete fairly
+CATEGORY_SPECIFICITY_PENALTIES = {
+    # Currently empty - vintage fixed via prompt instead
 }
 
 COMPOSITION_VOCABULARY = {
@@ -392,37 +465,61 @@ class MetadataExtractor:
                 return results[:top_k]
                 
             else:
-                # For Moods/Styles: Use RAW cosine similarity directly
-                # The sigmoid with bias -16 is too aggressive for subjective aesthetics
-                # Wallpaper mood/style classification typically has cosine similarities of 0.03-0.10
-                # so we use the raw values with a low threshold instead of sigmoid
+                # For Moods/Styles: Use RELATIVE scoring with specificity penalties
+                # This prevents generic labels from over-matching
                 
-                # Use raw cosine similarities as scores (they're already in 0-1 range for normalized vectors)
-                probs = logits
+                # Start with raw cosine similarities
+                raw_scores = logits.copy()
                 
-                # Use a very low threshold since these are raw cosine values, not probabilities
-                # Typical values are 0.03-0.08 for subjective aesthetic matches
-                raw_threshold = 0.04  # This captures the top matches
+                # Apply specificity penalties to known over-matching labels
+                adjusted_scores = np.zeros_like(raw_scores)
+                for i, label in enumerate(vocab_keys):
+                    penalty = LABEL_SPECIFICITY_PENALTIES.get(label, 1.0)
+                    adjusted_scores[i] = raw_scores[i] * penalty
                 
-                # Log score statistics
-                if len(probs) > 0:
-                    min_score = float(np.min(probs))
-                    max_score = float(np.max(probs))
-                    mean_score = float(np.mean(probs))
-                    logger.info(f"Raw cosine scores: min={min_score:.4f}, max={max_score:.4f}, mean={mean_score:.4f}")
+                # Log score statistics for debugging
+                if len(adjusted_scores) > 0:
+                    raw_max = float(np.max(raw_scores))
+                    adj_max = float(np.max(adjusted_scores))
+                    mean_score = float(np.mean(adjusted_scores))
+                    std_score = float(np.std(adjusted_scores))
+                    logger.info(f"Scores: raw_max={raw_max:.4f}, adj_max={adj_max:.4f}, "
+                               f"mean={mean_score:.4f}, std={std_score:.4f}")
                 
-                results = []
-                for i, score in enumerate(probs):
-                    if score >= raw_threshold:
-                        results.append((vocab_keys[i], float(score)))
+                # RELATIVE SCORING: Use z-score based threshold
+                # Only accept labels that are significantly above average
+                mean_score = np.mean(adjusted_scores)
+                std_score = np.std(adjusted_scores)
                 
-                results.sort(key=lambda x: x[1], reverse=True)
+                # Dynamic threshold: mean + 0.5*std (z-score of 0.5)
+                # This ensures only relatively distinctive matches are selected
+                z_threshold = mean_score + 0.5 * std_score
                 
-                if not results:
-                    # If nothing passes threshold, just take the top 2 anyway
-                    top_indices = np.argsort(probs)[-top_k:][::-1]
-                    results = [(vocab_keys[i], float(probs[i])) for i in top_indices]
-                    logger.info(f"No results passed threshold {raw_threshold:.3f}, returning top {top_k}: {results}")
+                # Build candidate list
+                candidates = []
+                for i, score in enumerate(adjusted_scores):
+                    if score >= z_threshold:
+                        candidates.append((vocab_keys[i], float(score), float(raw_scores[i])))
+                
+                candidates.sort(key=lambda x: x[1], reverse=True)
+                
+                if candidates:
+                    # Additional filter: only keep items within 75% of top score
+                    # This prevents weak secondary matches
+                    top_score = candidates[0][1]
+                    min_acceptable = top_score * 0.75
+                    candidates = [c for c in candidates if c[1] >= min_acceptable]
+                    
+                    # Return label and adjusted score
+                    results = [(c[0], c[1]) for c in candidates]
+                    logger.info(f"Selected {len(results)} labels above threshold {z_threshold:.4f}: "
+                               f"{[(r[0], f'{r[1]:.4f}') for r in results[:3]]}")
+                else:
+                    # Fallback: take top-k by adjusted score
+                    top_indices = np.argsort(adjusted_scores)[-top_k:][::-1]
+                    results = [(vocab_keys[i], float(adjusted_scores[i])) for i in top_indices]
+                    logger.info(f"No results above z-threshold {z_threshold:.4f}, "
+                               f"returning top {top_k}: {[(r[0], f'{r[1]:.4f}') for r in results]}")
                 
                 return results[:top_k]
             
