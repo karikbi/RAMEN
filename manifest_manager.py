@@ -271,7 +271,8 @@ class ManifestManager:
         # Upload to R2 if configured
         if self.r2_manager:
             try:
-                r2_url = self.r2_manager.upload_manifest(output_path)
+                # Use the output filename as the R2 key
+                r2_url = self.r2_manager.upload_manifest(output_path, key=output_path.name)
                 logger.info(f"📤 Manifest synced to R2: {r2_url}")
             except Exception as e:
                 logger.error(f"Failed to upload manifest to R2: {e}")
@@ -384,11 +385,14 @@ class ManifestManager:
         date_str = datetime.now().strftime("%Y_%m_%d")
         manifest_path = self._save_date_manifest(date_str, entries, test_mode)
         
-        # Upload to R2 if configured (skip for test mode)
-        if self.r2_manager and manifest_path.exists() and not test_mode:
+        # Upload to R2 if configured
+        if self.r2_manager and manifest_path.exists():
             try:
-                self.r2_manager.upload_manifest(manifest_path)
-                logger.info(f"📤 Manifest synced to R2")
+                # Use the manifest filename as the R2 key (date-wise naming)
+                # Test runs go to test/ subfolder in R2
+                r2_key = f"test/{manifest_path.name}" if test_mode else manifest_path.name
+                self.r2_manager.upload_manifest(manifest_path, key=r2_key)
+                logger.info(f"📤 Manifest synced to R2: {r2_key}")
             except Exception as e:
                 logger.warning(f"Failed to upload manifest to R2: {e}")
         
