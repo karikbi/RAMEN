@@ -278,33 +278,56 @@ class ManifestManager:
                 logger.error(f"Failed to upload manifest to R2: {e}")
                 # Continue - local save succeeded
     
+    def _collect_existing_manifest_names(self, base_name: str, ext: str) -> set[str]:
+        """Collect manifest filenames locally and on R2 to avoid collisions."""
+        existing: set[str] = set()
+        pattern = f"{base_name}*{ext}"
+        for path in self.config.manifests_dir.glob(pattern):
+            existing.add(path.name)
+        
+        if self.r2_manager:
+            try:
+                for key in self.r2_manager.list_manifests():
+                    name = Path(key).name
+                    if name.startswith(base_name) and name.endswith(ext):
+                        existing.add(name)
+            except Exception as e:
+                logger.warning(f"Failed to list manifests from R2: {e}")
+        
+        return existing
+    
     def _get_next_manifest_filename(self, date_str: str, test_mode: bool = False) -> str:
         """
         Get the next available manifest filename for today.
         
         Uses run numbering: date.json.gz, date-2.json.gz, date-3.json.gz, etc.
         For test mode: test_date.json.gz, test_date-2.json.gz, etc.
+        
+        Looks at both local files and existing R2 manifests so that CI runs do not
+        overwrite manual runs from the same day.
         """
         prefix = "test_" if test_mode else ""
         base_name = f"{prefix}{date_str}"
         ext = ".json.gz" if self.config.compressed else ".json"
         
-        # Check if base file exists
-        first_file = self.config.manifests_dir / f"{base_name}{ext}"
-        if not first_file.exists():
+        existing = self._collect_existing_manifest_names(base_name, ext)
+        if not existing:
             return f"{base_name}{ext}"
         
-        # Find next available run number
-        run_num = 2
-        while True:
-            filename = f"{base_name}-{run_num}{ext}"
-            if not (self.config.manifests_dir / filename).exists():
-                return filename
-            run_num += 1
-            # Safety limit
-            if run_num > 100:
-                logger.warning(f"Too many manifest files for {date_str}, overwriting last")
-                return filename
+        max_run = 1 if f"{base_name}{ext}" in existing else 0
+        suffix_len = len(ext)
+        for name in existing:
+            if name.startswith(f"{base_name}-") and name.endswith(ext):
+                try:
+                    run_part = name[len(base_name) + 1:-suffix_len]
+                    max_run = max(max_run, int(run_part))
+                except ValueError:
+                    continue
+        
+        next_run = max_run + 1 if max_run else 1
+        if next_run > 100:
+            logger.warning(f"Too many manifest files for {date_str}, overwriting last")
+        return f"{base_name}-{next_run}{ext}" if next_run > 1 else f"{base_name}{ext}"
     
     def _save_date_manifest(
         self, 
