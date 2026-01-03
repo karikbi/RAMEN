@@ -130,6 +130,7 @@ temp/*.json
 
 # Keep production manifests
 !manifests/*.json
+!manifests/*.json.gz
 !manifests/README.md
 
 # =============================================================================
