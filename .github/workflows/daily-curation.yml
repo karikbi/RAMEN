@@ -65,6 +65,11 @@ concurrency:
   group: daily-curation
   cancel-in-progress: true
 
+# Grant write permissions for pushing commits
+permissions:
+  contents: write
+  issues: write
+
 env:
   PYTHON_VERSION: '3.11'
   MODELS_CACHE_KEY: 'models-v1'
@@ -91,6 +96,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
       
       # =========================================================================
       # CREATE TEMP DIRECTORIES
