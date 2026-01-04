@@ -439,18 +439,23 @@ jobs:
             echo "⚠️ Failed to pull latest changes, attempting push anyway..."
           }
           
-          # Check for changes
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "No manifest changes to commit."
-            exit 0
-          fi
-          
-          # Add manifest files
+          # Add manifest files FIRST (before checking for changes)
+          # This ensures new untracked files like dedup_index.json.gz are detected
           git add manifests/ || true
           git add reports/statistics.json || true
           git add reports/validation_report.json || true
           git add metrics.json || true
           git add logs/*.log || true
+          
+          # Show what's being tracked
+          echo "📋 Git status after adding files:"
+          git status --short
+          
+          # Check for staged changes (after git add)
+          if git diff --cached --quiet; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
           
           # Create commit message with stats
           APPROVED="${{ steps.run-pipeline.outputs.approved }}"
