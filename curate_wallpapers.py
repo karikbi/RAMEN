@@ -1060,8 +1060,9 @@ async def fetch_candidates(
                         success = await downloader.download_image(session, wp["url"], filepath)
                         
                         if success:
+                            wp_id = wp.get("full_id", f"4kwallpapers_{wp['id']}")
                             candidates.append(CandidateWallpaper(
-                                id=wp.get("full_id", f"4kwallpapers_{wp['id']}"),
+                                id=wp_id,
                                 source="4kwallpapers",
                                 filepath=filepath,
                                 url=wp["url"],
@@ -1072,6 +1073,9 @@ async def fetch_candidates(
                                     "source_page": wp.get("source_page", ""),
                                 },
                             ))
+                            # Register in dedup index
+                            if dedup_checker:
+                                dedup_checker.register(wp_id=wp_id, url=wp["url"], filepath=filepath)
                         await asyncio.sleep(0.5)  # Brief delay between downloads
                     except Exception as e:
                         logger.warning(f"Failed to process 4KWallpapers {wp['id']}: {e}")
@@ -1090,8 +1094,9 @@ async def fetch_candidates(
                         success = await downloader.download_image(session, wp["url"], filepath)
                         
                         if success:
+                            wp_id = wp.get("full_id", f"wallpapercat_{wp['id']}")
                             candidates.append(CandidateWallpaper(
-                                id=wp.get("full_id", f"wallpapercat_{wp['id']}"),
+                                id=wp_id,
                                 source="wallpapercat",
                                 filepath=filepath,
                                 url=wp["url"],
@@ -1103,6 +1108,9 @@ async def fetch_candidates(
                                     "source_page": wp.get("source_page", ""),
                                 },
                             ))
+                            # Register in dedup index
+                            if dedup_checker:
+                                dedup_checker.register(wp_id=wp_id, url=wp["url"], filepath=filepath)
                         await asyncio.sleep(0.5)  # Brief delay between downloads
                     except Exception as e:
                         logger.warning(f"Failed to process WallpaperCat {wp['id']}: {e}")
