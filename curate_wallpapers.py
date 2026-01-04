@@ -32,6 +32,13 @@ try:
 except ImportError:
     HAS_CONFIG_LOADER = False
 
+# Web scrapers
+try:
+    from web_scrapers import WebScrapingCoordinator, WebScrapingConfig
+    HAS_WEB_SCRAPERS = True
+except ImportError:
+    HAS_WEB_SCRAPERS = False
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -72,16 +79,20 @@ class Config:
         get_central_config().get('quality.threshold', 5.5) if HAS_CONFIG_LOADER else 5.5
     )
     
-    # Subreddit configurations - lowered upvote requirements for more candidates
+    # Subreddit configurations - Total: 400 wallpapers from Reddit
     subreddits: list[SubredditConfig] = field(default_factory=lambda: [
-        SubredditConfig("wallpapers", 100, 100),       # Was 1000 - got 0
-        SubredditConfig("EarthPorn", 80, 500),         # Working well
-        SubredditConfig("Amoledbackgrounds", 60, 50),  # Was 300 - got 6
-        SubredditConfig("spaceporn", 50, 200),         # Working well
-        SubredditConfig("CityPorn", 50, 200),          # Working well
-        SubredditConfig("SkyPorn", 40, 100),           # Was 500 - got 16
-        SubredditConfig("MinimalWallpaper", 40, 20),   # Was 200 - got 0
-        SubredditConfig("ImaginaryLandscapes", 40, 100), # Was 500 - got 4
+        SubredditConfig("WQHD_Wallpaper", 50, 100),    # New: High quality wallpapers
+        SubredditConfig("wallpaper", 50, 100),         # New: General wallpapers
+        SubredditConfig("AnimeLandscapes", 40, 100),   # New: Anime landscape wallpapers
+        SubredditConfig("Moescape", 40, 100),          # New: Anime scenic wallpapers
+        SubredditConfig("wallpapers", 35, 100),        # General wallpapers
+        SubredditConfig("EarthPorn", 35, 500),         # Nature photography
+        SubredditConfig("Amoledbackgrounds", 30, 50),  # AMOLED-friendly
+        SubredditConfig("spaceporn", 30, 200),         # Space photography
+        SubredditConfig("CityPorn", 30, 200),          # Urban photography
+        SubredditConfig("SkyPorn", 20, 100),           # Sky photography
+        SubredditConfig("MinimalWallpaper", 20, 20),   # Minimal design
+        SubredditConfig("ImaginaryLandscapes", 20, 100), # Fantasy art
     ])
     
     # Candidate counts per source - increased for more wallpapers
@@ -887,7 +898,7 @@ async def fetch_candidates(
     
     # In test mode, reduce fetch counts drastically
     if test_mode:
-        logger.info("🧪 TEST MODE: Using reduced fetch counts (5 Reddit, 2 Unsplash, 3 Pexels)")
+        logger.info("🧪 TEST MODE: Using reduced fetch counts (5 Reddit, 2 Unsplash, 3 Pexels, 3 4KWallpapers, 3 WallpaperCat)")
         # Configure test limits - only use first subreddit to get exactly 5 Reddit wallpapers
         if config.subreddits:
             config.subreddits = [config.subreddits[0]]  # Keep only first subreddit
@@ -1015,6 +1026,92 @@ async def fetch_candidates(
                     continue
         else:
             logger.warning("Skipping Pexels: missing API key")
+
+        # 4. Web Scraped Sources (4KWallpapers, WallpaperCat)
+        if HAS_WEB_SCRAPERS:
+            logger.info("\n🌐 Scraping from web sources (4KWallpapers, WallpaperCat)...")
+            try:
+                scrape_config = WebScrapingConfig()
+                
+                # In test mode, reduce scraping counts
+                if test_mode:
+                    # Only fetch a few from each source for testing
+                    from web_scrapers import ScrapingSourceConfig
+                    scrape_config.fourk_sources = [
+                        ScrapingSourceConfig("minimalism", "https://4kwallpapers.com/minimalism-wallpapers/", 3)
+                    ]
+                    scrape_config.wallpapercat_sources = [
+                        ScrapingSourceConfig("studio-ghibli", "https://wallpapercat.com/studio-ghibli-wallpapers", 3)
+                    ]
+                
+                coordinator = WebScrapingCoordinator(scrape_config)
+                scraped_results = await coordinator.fetch_all_parallel(session, dedup_checker)
+                
+                # Process 4KWallpapers results
+                fourk_wallpapers = scraped_results.get("4kwallpapers", [])
+                logger.info(f"Processing {len(fourk_wallpapers)} 4KWallpapers...")
+                
+                for wp in fourk_wallpapers:
+                    try:
+                        ext = get_file_extension(wp["url"])
+                        filename = f"4kwallpapers_{wp['id']}{ext}"
+                        filepath = config.candidates_dir / filename
+                        
+                        success = await downloader.download_image(session, wp["url"], filepath)
+                        
+                        if success:
+                            candidates.append(CandidateWallpaper(
+                                id=wp.get("full_id", f"4kwallpapers_{wp['id']}"),
+                                source="4kwallpapers",
+                                filepath=filepath,
+                                url=wp["url"],
+                                title=wp.get("title", "Wallpaper"),
+                                artist="4KWallpapers",
+                                metadata={
+                                    "resolution": wp.get("resolution"),
+                                    "source_page": wp.get("source_page", ""),
+                                },
+                            ))
+                        await asyncio.sleep(0.5)  # Brief delay between downloads
+                    except Exception as e:
+                        logger.warning(f"Failed to process 4KWallpapers {wp['id']}: {e}")
+                        continue
+                
+                # Process WallpaperCat results
+                wallpapercat_wallpapers = scraped_results.get("wallpapercat", [])
+                logger.info(f"Processing {len(wallpapercat_wallpapers)} WallpaperCat...")
+                
+                for wp in wallpapercat_wallpapers:
+                    try:
+                        ext = get_file_extension(wp["url"])
+                        filename = f"wallpapercat_{wp['id']}{ext}"
+                        filepath = config.candidates_dir / filename
+                        
+                        success = await downloader.download_image(session, wp["url"], filepath)
+                        
+                        if success:
+                            candidates.append(CandidateWallpaper(
+                                id=wp.get("full_id", f"wallpapercat_{wp['id']}"),
+                                source="wallpapercat",
+                                filepath=filepath,
+                                url=wp["url"],
+                                title=wp.get("title", "Wallpaper"),
+                                artist="WallpaperCat",
+                                metadata={
+                                    "collection": wp.get("collection", ""),
+                                    "resolution": wp.get("resolution"),
+                                    "source_page": wp.get("source_page", ""),
+                                },
+                            ))
+                        await asyncio.sleep(0.5)  # Brief delay between downloads
+                    except Exception as e:
+                        logger.warning(f"Failed to process WallpaperCat {wp['id']}: {e}")
+                        continue
+                        
+            except Exception as e:
+                logger.error(f"Web scraping failed: {e}")
+        else:
+            logger.info("Web scrapers not available (missing dependencies)")
     
     return candidates
 
@@ -1056,16 +1153,20 @@ async def main(test_mode: bool = False, dedup_checker: Optional["DuplicateChecke
     reddit_count = sum(1 for c in all_candidates if c.source == 'reddit')
     unsplash_count = sum(1 for c in all_candidates if c.source == 'unsplash')
     pexels_count = sum(1 for c in all_candidates if c.source == 'pexels')
+    fourk_count = sum(1 for c in all_candidates if c.source == '4kwallpapers')
+    wallpapercat_count = sum(1 for c in all_candidates if c.source == 'wallpapercat')
     
     logger.info("\n" + "=" * 60)
     logger.info("FETCHING COMPLETE - SUMMARY")
     logger.info("=" * 60)
-    logger.info(f"  Reddit:   {reddit_count} candidates")
-    logger.info(f"  Unsplash: {unsplash_count} candidates")
-    logger.info(f"  Pexels:   {pexels_count} candidates")
+    logger.info(f"  Reddit:       {reddit_count} candidates")
+    logger.info(f"  Unsplash:     {unsplash_count} candidates")
+    logger.info(f"  Pexels:       {pexels_count} candidates")
+    logger.info(f"  4KWallpapers: {fourk_count} candidates")
+    logger.info(f"  WallpaperCat: {wallpapercat_count} candidates")
     logger.info("-" * 60)
-    logger.info(f"  TOTAL:    {len(all_candidates)} candidates downloaded")
-    logger.info(f"  Location: {config.candidates_dir.absolute()}")
+    logger.info(f"  TOTAL:        {len(all_candidates)} candidates downloaded")
+    logger.info(f"  Location:     {config.candidates_dir.absolute()}")
     logger.info("=" * 60)
     
     return all_candidates

@@ -44,8 +44,8 @@ class FilterResult:
 @dataclass  
 class FilterConfig:
     """Configuration for hard filters."""
-    min_width: int = 1920  # Lowered from 2560 for more approvals
-    min_height: int = 1080  # Lowered from 1440 for more approvals
+    min_width: int = 2560  # 2K quality requirement
+    min_height: int = 1440  # 2K quality requirement
     min_file_size: int = 100 * 1024  # 100KB (lowered from 200KB)
     max_file_size: int = 20 * 1024 * 1024  # 20MB (increased from 15MB)
     min_aspect_ratio: float = 0.5  # Portrait minimum (e.g., 9:16)
@@ -107,18 +107,14 @@ class HardFilters:
     def check_resolution(self, img: Image.Image) -> Tuple[bool, str]:
         """Check minimum resolution requirements.
         
-        Only accepts landscape orientation (width >= height):
-        - Minimum: 1920x1080 (Full HD)
-        - Portrait images are rejected to prevent them from dominating
+        Requires at least 2K quality (2560x1440).
+        Accepts any aspect ratio (phone, desktop, tablet, 4:3, etc.) as long as
+        at least one dimension meets the 2K threshold.
         """
         width, height = img.size
         
-        # Enforce landscape orientation only
-        if width < height:
-            return False, f"Portrait orientation not allowed: {width}x{height} (landscape only)"
-        
-        # Check minimum dimensions
-        if width < self.config.min_width or height < self.config.min_height:
+        # Check minimum dimensions - at least one dimension must meet 2K quality
+        if width < self.config.min_width and height < self.config.min_height:
             return False, f"Resolution too low: {width}x{height} (min: {self.config.min_width}x{self.config.min_height})"
         
         return True, ""

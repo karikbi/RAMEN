@@ -465,10 +465,10 @@ class DedupSync:
     
     def download_index(self) -> Optional[DuplicateIndex]:
         """
-        Load dedup index (Repo -> R2 -> Local Cache).
+        Load dedup index from GitHub repo.
         
         Returns:
-            DuplicateIndex if found, None otherwise.
+            DuplicateIndex if found, or empty index on first run.
         """
         # 1. Try Repo Path (Git tracked)
         if self.repo_path and self.repo_path.exists():
@@ -486,32 +486,9 @@ class DedupSync:
             except Exception as e:
                 logger.warning(f"Failed to load form repo path {self.repo_path}: {e}")
 
-        if self.r2_client and self.bucket and not self.repo_path:
-            try:
-                logger.info(f"📥 Downloading dedup index from R2: {self.index_key}")
-                
-                response = self.r2_client.get_object(
-                    Bucket=self.bucket,
-                    Key=self.index_key
-                )
-                
-                # Read and decompress
-                compressed_data = response["Body"].read()
-                json_data = gzip.decompress(compressed_data).decode("utf-8")
-                data = json.loads(json_data)
-                
-                index = DuplicateIndex.from_dict(data)
-                self._log_stats(index, "Loaded from R2")
-                
-                return index
-                
-            except self.r2_client.exceptions.NoSuchKey:
-                logger.info("No existing dedup index found in R2")
-            except Exception as e:
-                logger.warning(f"Failed to download dedup index from R2: {e}")
-        
-        # 3. Try Local Cache
-        return self._load_local_cache()
+        # No repo file found - return empty index (first run)
+        logger.info("No dedup index found in repo, starting fresh")
+        return DuplicateIndex()
     
     def sync_index(self, index: DuplicateIndex) -> bool:
         """
@@ -534,26 +511,9 @@ class DedupSync:
                 logger.error(f"Failed to save to repo path: {e}")
                 success = False
 
-        # 2. Upload to R2 (Only if not using repo path)
-        if self.r2_client and self.bucket and not self.repo_path:
-            try:
-                logger.info(f"📤 Uploading dedup index to R2: {self.index_key}")
-                
-                # Serialize and compress
-                json_data = json.dumps(index.to_dict())
-                compressed_data = gzip.compress(json_data.encode("utf-8"))
-                
-                self.r2_client.put_object(
-                    Bucket=self.bucket,
-                    Key=self.index_key,
-                    Body=compressed_data,
-                    ContentType="application/gzip"
-                )
-                
-                self._log_stats(index, "Uploaded to R2")
-                
-            except Exception as e:
-                logger.error(f"Failed to upload dedup index to R2: {e}")
+        # Log stats after save
+        if success:
+            self._log_stats(index, "Saved to repo")
         
         return success
 
