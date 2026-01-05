@@ -447,8 +447,8 @@ jobs:
           }
           
           # Add manifest files FIRST (before checking for changes)
-          # This ensures new untracked files like dedup_index.json.gz are detected
-          git add manifests/ || true
+          # Only add dedup index, NOT daily manifests (those go to R2 only)
+          git add manifests/dedup_index.json.gz || true
           git add reports/statistics.json || true
           git add reports/validation_report.json || true
           git add metrics.json || true
@@ -460,7 +460,7 @@ jobs:
           
           # Check for staged changes (after git add)
           if git diff --cached --quiet; then
-            echo "No manifest changes to commit."
+            echo "No changes to commit."
             exit 0
           fi
           
@@ -473,7 +473,9 @@ jobs:
                      -m "Automated by RAMEN Pipeline" \
                      -m "Candidates: ${{ steps.run-pipeline.outputs.candidates }}" \
                      -m "Approved: ${{ steps.run-pipeline.outputs.approved }}" \
-                     -m "Rejected: ${{ steps.run-pipeline.outputs.rejected }}" || true
+                     -m "Rejected: ${{ steps.run-pipeline.outputs.rejected }}" \
+                     -m "" \
+                     -m "Note: Daily manifests stored on R2, not in Git" || true
           
           # Push changes
           git push origin main

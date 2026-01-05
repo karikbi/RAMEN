@@ -336,13 +336,18 @@ class ManifestManager:
         test_mode: bool = False
     ) -> Path:
         """
-        Save manifest for a specific date with run numbering.
+        Save manifest for a specific date with run numbering to temp directory.
         
+        Saves to temp/manifests/ to avoid Git tracking (R2-only storage).
         Creates new file for each run: date.json.gz, date-2.json.gz, etc.
         Test runs use prefix: test_date.json.gz
         """
+        # Use temp directory for R2-only storage (not tracked by Git)
+        temp_manifests_dir = Path("./temp/manifests")
+        temp_manifests_dir.mkdir(parents=True, exist_ok=True)
+        
         manifest_filename = self._get_next_manifest_filename(date_str, test_mode)
-        manifest_path = self.config.manifests_dir / manifest_filename
+        manifest_path = temp_manifests_dir / manifest_filename
         
         manifest = {
             "version": "1.2",
@@ -361,7 +366,7 @@ class ManifestManager:
                 json.dump(manifest, f, indent=2)
         
         mode_label = "🧪 TEST" if test_mode else "📅"
-        logger.info(f"{mode_label} Saved manifest: {manifest_path} ({len(wallpapers)} wallpapers)")
+        logger.info(f"{mode_label} Saved manifest to temp (R2-only): {manifest_path} ({len(wallpapers)} wallpapers)")
         return manifest_path
     
     def update_manifest(

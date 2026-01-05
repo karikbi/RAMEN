@@ -133,6 +133,12 @@ temp/*.json
 !manifests/*.json.gz
 !manifests/README.md
 
+# Daily Manifests (R2-only storage) - exclude date-specific files
+manifests/*_*.json.gz
+manifests/test_*.json.gz
+# But always track dedup index
+!manifests/dedup_index.json.gz
+
 # =============================================================================
 # IDE & Editor Files
 # =============================================================================
