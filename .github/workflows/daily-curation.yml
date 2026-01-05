@@ -241,39 +241,63 @@ jobs:
           
           BUCKET="${{ secrets.R2_BUCKET_NAME }}"
           
-          echo "📁 Listing current R2 contents..."
-          rclone ls r2:$BUCKET --max-depth 2 | head -20 || echo "Bucket may be empty"
+          echo "📁 Listing current R2 contents before cleanup..."
+          rclone size r2:$BUCKET 2>&1 || echo "Bucket may be empty"
+          echo ""
+          rclone ls r2:$BUCKET --max-depth 2 | head -20 || echo "No files to list"
           
           echo ""
-          echo "🗑️ Deleting manifests..."
-          rclone delete r2:$BUCKET/manifests/ --verbose 2>&1 || echo "No manifests to delete"
-          
-          echo "🗑️ Deleting wallpaper images..."
-          rclone delete r2:$BUCKET/2025/ --verbose 2>&1 || echo "No 2025 wallpapers to delete"
-          rclone delete r2:$BUCKET/2024/ --verbose 2>&1 || echo "No 2024 wallpapers to delete"
-          
-          echo "🗑️ Deleting dedup index..."
-          rclone delete r2:$BUCKET/dedup/ --verbose 2>&1 || echo "No dedup data to delete"
+          echo "🗑️ Purging manifests (removes directory and all contents)..."
+          rclone purge r2:$BUCKET/manifests/ --verbose 2>&1 || echo "No manifests to purge"
           
           echo ""
-          echo "📁 R2 contents after cleanup:"
-          rclone ls r2:$BUCKET --max-depth 2 || echo "Bucket is now empty"
+          echo "🗑️ Purging wallpaper images..."
+          rclone purge r2:$BUCKET/2025/ --verbose 2>&1 || echo "No 2025 wallpapers to purge"
+          rclone purge r2:$BUCKET/2024/ --verbose 2>&1 || echo "No 2024 wallpapers to purge"
+          rclone purge r2:$BUCKET/2026/ --verbose 2>&1 || echo "No 2026 wallpapers to purge"
+          
+          echo ""
+          echo "🗑️ Purging dedup index..."
+          rclone purge r2:$BUCKET/dedup/ --verbose 2>&1 || echo "No dedup data to purge"
+          
+          echo ""
+          echo "🗑️ Cleaning up any remaining root-level files..."
+          rclone delete r2:$BUCKET/ --max-depth 1 --verbose 2>&1 || echo "No root files to delete"
+          
+          echo ""
+          echo "📁 Verifying R2 bucket is empty..."
+          REMAINING=$(rclone size r2:$BUCKET --json 2>/dev/null | jq -r '.count // 0' || echo "0")
+          
+          if [ "$REMAINING" != "0" ] && [ -n "$REMAINING" ]; then
+            echo "⚠️ WARNING: $REMAINING objects still remain in R2!"
+            echo "Listing remaining objects:"
+            rclone ls r2:$BUCKET | head -50
+          else
+            echo "✅ Bucket is completely empty!"
+          fi
           
           echo ""
           echo "🧹 Clearing local manifest files..."
           rm -rf manifests/*.json.gz manifests/*.json 2>/dev/null || true
           rm -f existing_hashes.json source_stats.json 2>/dev/null || true
           
-          echo "✅ R2 and local data cleared - ready for fresh start!"
           echo ""
+          echo "✅ R2 and local data cleared - ready for fresh start!"
           
           # Add summary
           echo "## ⚠️ R2 Data Cleared" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "All data has been deleted from R2 bucket:" >> $GITHUB_STEP_SUMMARY
-          echo "- Manifests" >> $GITHUB_STEP_SUMMARY
-          echo "- Wallpaper images" >> $GITHUB_STEP_SUMMARY
-          echo "- Dedup index" >> $GITHUB_STEP_SUMMARY
+          echo "All data has been purged from R2 bucket using \`rclone purge\` (recommended by Cloudflare):" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Manifests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Wallpaper images (2024, 2025, 2026)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dedup index" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Root-level files" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$REMAINING" != "0" ] && [ -n "$REMAINING" ]; then
+            echo "⚠️ **Warning**: $REMAINING objects still remain - check workflow logs" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Verified empty**: Bucket contains 0 objects" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Next run will start with a completely fresh collection.**" >> $GITHUB_STEP_SUMMARY
 
