@@ -1,17 +1,17 @@
 {
-  "candidates_total": 332,
-  "approved_total": 13,
-  "rejected_total": 79,
-  "uploaded_total": 13,
+  "candidates_total": 336,
+  "approved_total": 8,
+  "rejected_total": 81,
+  "uploaded_total": 8,
   "by_source": {
-    "reddit": 252,
+    "reddit": 255,
     "unsplash": 0,
     "pexels": 80
   },
-  "passed_hard_filters": 38,
-  "passed_quality_scoring": 13,
+  "passed_hard_filters": 33,
+  "passed_quality_scoring": 8,
   "rejection_breakdown": {
-    "resolution": 40,
+    "resolution": 42,
     "file_integrity": 5,
     "aspect_ratio": 0,
     "text_detection": 0,
@@ -19,5 +19,5 @@
     "duplicate": 0,
     "quality_score": 25
   },
-  "timestamp": "2026-01-27T21:17:23.258780Z"
+  "timestamp": "2026-01-28T21:24:18.689766Z"
 }
