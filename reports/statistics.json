@@ -1,10 +1,10 @@
 {
-  "candidates_total": 335,
+  "candidates_total": 345,
   "approved_total": 7,
   "rejected_total": 88,
   "uploaded_total": 7,
   "by_source": {
-    "reddit": 255,
+    "reddit": 253,
     "unsplash": 0,
     "pexels": 80
   },
@@ -19,5 +19,5 @@
     "duplicate": 0,
     "quality_score": 27
   },
-  "timestamp": "2026-02-05T21:29:06.938113Z"
+  "timestamp": "2026-02-06T21:27:43.549341Z"
 }
