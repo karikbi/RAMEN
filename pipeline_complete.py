@@ -270,6 +270,8 @@ class WallpaperCurationPipeline:
         self.stats.rejected_file_size = filter_stats.rejected_file_size
         self.stats.rejected_duplicate = filter_stats.rejected_duplicate
         self.stats.rejected_quality_score = filter_stats.rejected_quality_score
+        self.stats.rejected_download_failed = filter_stats.rejected_download_failed
+        self.stats.rejected_other = filter_stats.rejected_other
         self.stats.approved_count = len(approved)
         
         # Collect quality scores
@@ -280,6 +282,9 @@ class WallpaperCurationPipeline:
             cat = wp.metadata.primary_category or "unknown"
             self.stats.category_counts[cat] = self.stats.category_counts.get(cat, 0) + 1
         
+        # Build accurate per-source candidate/approval counts for reporting.
+        self._record_source_results(candidates, approved)
+
         self.stats.filter_duration_sec = time.time() - start
         
 
@@ -362,38 +367,53 @@ class WallpaperCurationPipeline:
         
         # Update source statistics
         logger.info("📈 Updating source statistics...")
-        self._update_source_stats(approved)
+        self._update_source_stats()
         
         return r2_urls
     
-    def _update_source_stats(self, approved: list[ApprovedWallpaper]) -> None:
-        """Update source statistics for adaptive balancing."""
-        # Group by source and subreddit
-        source_counts = {}
-        
+    def _record_source_results(
+        self,
+        candidates: list[CandidateWallpaper],
+        approved: list[ApprovedWallpaper],
+    ) -> None:
+        """Populate report-ready source results with true candidate denominators."""
+        candidate_counts: dict[str, int] = {}
+        approved_counts: dict[str, int] = {}
+
+        for c in candidates:
+            if c.source == "reddit":
+                subreddit = str(c.metadata.get("subreddit", "")).strip() or "unknown"
+                key = f"reddit_{subreddit}"
+            else:
+                key = c.source
+            candidate_counts[key] = candidate_counts.get(key, 0) + 1
+
         for wp in approved:
             if wp.source == "reddit":
-                subreddit = wp.metadata.subreddit
+                subreddit = str(getattr(wp.metadata, "subreddit", "")).strip() or "unknown"
                 key = f"reddit_{subreddit}"
             else:
                 key = wp.source
-            
-            source_counts[key] = source_counts.get(key, 0) + 1
-        
-        # Track what we approved
-        for key, count in source_counts.items():
-            if key.startswith("reddit_"):
-                subreddit = key.replace("reddit_", "")
-                self.source_stats.update_stats("reddit", count, count, subreddit)
-            else:
-                self.source_stats.update_stats(key, count, count)
-        
-        # Store for report
-        for key, count in source_counts.items():
+            approved_counts[key] = approved_counts.get(key, 0) + 1
+
+        self.stats.source_results = {}
+        for key in sorted(set(candidate_counts) | set(approved_counts)):
             self.stats.source_results[key] = {
-                "candidates": count,  # Approximation
-                "approved": count
+                "candidates": candidate_counts.get(key, 0),
+                "approved": approved_counts.get(key, 0),
             }
+
+    def _update_source_stats(self) -> None:
+        """Update source statistics for adaptive balancing."""
+        for key, data in self.stats.source_results.items():
+            candidates = data.get("candidates", 0)
+            approved = data.get("approved", 0)
+
+            if key.startswith("reddit_"):
+                subreddit = key.replace("reddit_", "", 1)
+                self.source_stats.update_stats("reddit", candidates, approved, subreddit)
+            else:
+                self.source_stats.update_stats(key, candidates, approved)
     
     def generate_final_report(self) -> Path:
         """Generate final pipeline report."""

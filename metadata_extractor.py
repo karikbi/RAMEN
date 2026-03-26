@@ -22,6 +22,23 @@ from sklearn.cluster import KMeans
 logger = logging.getLogger("wallpaper_curator")
 
 
+def _extract_siglip_tensor(output):
+    """Extract tensor from SigLIP model output.
+    
+    Handles both raw tensor returns and BaseModelOutputWithPooling objects
+    that may be returned by newer transformers versions.
+    """
+    if hasattr(output, 'image_embeds') and output.image_embeds is not None:
+        return output.image_embeds
+    elif hasattr(output, 'text_embeds') and output.text_embeds is not None:
+        return output.text_embeds
+    elif hasattr(output, 'pooler_output') and output.pooler_output is not None:
+        return output.pooler_output
+    elif hasattr(output, 'last_hidden_state'):
+        return output.last_hidden_state[:, 0]  # CLS token
+    elif isinstance(output, (tuple, list)) and len(output) > 0:
+        return _extract_siglip_tensor(output[0])
+    return output  # Already a tensor
 # =============================================================================
 # VOCABULARY DEFINITIONS
 # =============================================================================

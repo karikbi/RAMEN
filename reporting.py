@@ -41,6 +41,8 @@ class PipelineStats:
     rejected_text_detection: int = 0
     rejected_file_size: int = 0
     rejected_duplicate: int = 0
+    rejected_download_failed: int = 0
+    rejected_other: int = 0
     
     # Quality scoring
     passed_quality_scoring: int = 0
@@ -115,15 +117,19 @@ class ReportGenerator:
             Report as dictionary.
         """
         # Calculate derived metrics
-        total_rejected = (
+        total_rejected = max(stats.total_candidates - stats.approved_count, 0)
+        tracked_rejected = (
             stats.rejected_resolution +
             stats.rejected_file_integrity +
             stats.rejected_aspect_ratio +
             stats.rejected_text_detection +
             stats.rejected_file_size +
             stats.rejected_duplicate +
-            stats.rejected_quality_score
+            stats.rejected_quality_score +
+            stats.rejected_download_failed +
+            stats.rejected_other
         )
+        rejected_unaccounted = max(total_rejected - tracked_rejected, 0)
         
         avg_quality = (
             sum(stats.quality_scores) / len(stats.quality_scores)
@@ -171,6 +177,9 @@ class ReportGenerator:
                     "file_size": stats.rejected_file_size,
                     "duplicate": stats.rejected_duplicate,
                     "quality_score": stats.rejected_quality_score,
+                    "download_failed": stats.rejected_download_failed,
+                    "other": stats.rejected_other,
+                    "unaccounted": rejected_unaccounted,
                 }
             },
             "quality": {
@@ -362,16 +371,20 @@ def save_statistics(stats: PipelineStats, output_dir: Path = Path("./reports")) 
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Calculate total rejected
-    total_rejected = (
+    # Keep summary math strict and deterministic for workflow outputs.
+    total_rejected = max(stats.total_candidates - stats.approved_count, 0)
+    tracked_rejected = (
         stats.rejected_resolution +
         stats.rejected_file_integrity +
         stats.rejected_aspect_ratio +
         stats.rejected_text_detection +
         stats.rejected_file_size +
         stats.rejected_duplicate +
-        stats.rejected_quality_score
+        stats.rejected_quality_score +
+        stats.rejected_download_failed +
+        stats.rejected_other
     )
+    rejected_unaccounted = max(total_rejected - tracked_rejected, 0)
     
     statistics = {
         "candidates_total": stats.total_candidates,
@@ -394,6 +407,9 @@ def save_statistics(stats: PipelineStats, output_dir: Path = Path("./reports")) 
             "file_size": stats.rejected_file_size,
             "duplicate": stats.rejected_duplicate,
             "quality_score": stats.rejected_quality_score,
+            "download_failed": stats.rejected_download_failed,
+            "other": stats.rejected_other,
+            "unaccounted": rejected_unaccounted,
         },
         "timestamp": datetime.now().isoformat() + "Z",
     }
