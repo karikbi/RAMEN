@@ -79,6 +79,8 @@ class FilteringStats:
     rejected_file_size: int = 0
     rejected_duplicate: int = 0
     rejected_quality_score: int = 0
+    rejected_download_failed: int = 0  # Candidates with no/invalid filepath
+    rejected_other: int = 0  # Valid rejection reason but no explicit bucket match
     
     def log_summary(self) -> None:
         """Log filtering summary."""
@@ -98,6 +100,8 @@ class FilteringStats:
         logger.info(f"  - File Size:       {self.rejected_file_size}")
         logger.info(f"  - Duplicate:       {self.rejected_duplicate}")
         logger.info(f"  - Quality Score:   {self.rejected_quality_score}")
+        logger.info(f"  - Download Failed: {self.rejected_download_failed}")
+        logger.info(f"  - Other:           {self.rejected_other}")
         logger.info("=" * 60)
 
 
@@ -128,11 +132,36 @@ class FilteringPipeline:
             dedup_checker: Deduplication checker instance.
         """
         self.config = config
-        self.filter_config = filter_config or FilterConfig()
+        if filter_config is None:
+            central = get_config()
+            filter_config = FilterConfig(
+                min_width=int(central.get("filters.min_width", 2560)),
+                min_height=int(central.get("filters.min_height", 1440)),
+                min_file_size=int(central.get("filters.min_file_size_kb", 100)) * 1024,
+                max_file_size=int(central.get("filters.max_file_size_mb", 20)) * 1024 * 1024,
+                min_aspect_ratio=float(central.get("filters.min_aspect_ratio", 0.5)),
+                max_aspect_ratio=float(central.get("filters.max_aspect_ratio", 3.0)),
+                max_text_coverage=float(central.get("filters.max_text_coverage", 0.50)),
+                hash_similarity_threshold=int(central.get("filters.phash_threshold", 10)),
+            )
+
+        self.filter_config = filter_config
         self.quality_config = quality_config or MLQualityConfig(
             threshold=config.quality_threshold
         )
         self.dedup_checker = dedup_checker
+
+        logger.info(
+            "Hard filters config: min=%sx%s, size=%sKB-%sMB, aspect=%.2f-%.2f, text<=%.2f, phash<=%s",
+            self.filter_config.min_width,
+            self.filter_config.min_height,
+            self.filter_config.min_file_size // 1024,
+            self.filter_config.max_file_size // (1024 * 1024),
+            self.filter_config.min_aspect_ratio,
+            self.filter_config.max_aspect_ratio,
+            self.filter_config.max_text_coverage,
+            self.filter_config.hash_similarity_threshold,
+        )
         
         # Initialize components
         self.hard_filters = HardFilters(self.filter_config, dedup_checker=self.dedup_checker)
@@ -202,6 +231,8 @@ class FilteringPipeline:
             self.stats.rejected_file_size += 1
         elif "duplicate" in reason_lower:
             self.stats.rejected_duplicate += 1
+        else:
+            self.stats.rejected_other += 1
     
     def process_candidate(self, candidate: CandidateWallpaper) -> Optional[ApprovedWallpaper]:
         """

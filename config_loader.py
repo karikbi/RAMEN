@@ -62,13 +62,13 @@ class SourcesConfig:
 @dataclass
 class FilterConfig:
     """Hard filter configuration."""
-    min_width: int = 2560
-    min_height: int = 1440
-    min_file_size_kb: int = 200
-    max_file_size_mb: int = 15
-    min_aspect_ratio: float = 1.77
-    max_aspect_ratio: float = 2.33
-    max_text_coverage: float = 0.30
+    min_width: int = 1920
+    min_height: int = 1080
+    min_file_size_kb: int = 100
+    max_file_size_mb: int = 20
+    min_aspect_ratio: float = 0.5
+    max_aspect_ratio: float = 3.0
+    max_text_coverage: float = 0.50
     phash_threshold: int = 10
 
 
@@ -237,13 +237,13 @@ class ConfigLoader:
         filters = self.raw_config.get("filters", {})
         
         return FilterConfig(
-            min_width=filters.get("min_width", 2560),
-            min_height=filters.get("min_height", 1440),
-            min_file_size_kb=filters.get("min_file_size_kb", 200),
-            max_file_size_mb=filters.get("max_file_size_mb", 15),
-            min_aspect_ratio=filters.get("min_aspect_ratio", 1.77),
-            max_aspect_ratio=filters.get("max_aspect_ratio", 2.33),
-            max_text_coverage=filters.get("max_text_coverage", 0.30),
+            min_width=filters.get("min_width", 1920),
+            min_height=filters.get("min_height", 1080),
+            min_file_size_kb=filters.get("min_file_size_kb", 100),
+            max_file_size_mb=filters.get("max_file_size_mb", 20),
+            min_aspect_ratio=filters.get("min_aspect_ratio", 0.5),
+            max_aspect_ratio=filters.get("max_aspect_ratio", 3.0),
+            max_text_coverage=filters.get("max_text_coverage", 0.50),
             phash_threshold=filters.get("phash_threshold", 10),
         )
     

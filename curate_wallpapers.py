@@ -51,6 +51,62 @@ class SubredditConfig:
     min_upvotes: int
 
 
+def _default_subreddit_configs() -> list[SubredditConfig]:
+    """Fallback subreddit list used when central config is missing or invalid."""
+    return [
+        SubredditConfig("WQHD_Wallpaper", 50, 100),
+        SubredditConfig("wallpaper", 50, 100),
+        SubredditConfig("AnimeLandscapes", 40, 100),
+        SubredditConfig("Moescape", 40, 100),
+        SubredditConfig("wallpapers", 35, 100),
+        SubredditConfig("EarthPorn", 35, 500),
+        SubredditConfig("Amoledbackgrounds", 30, 50),
+        SubredditConfig("spaceporn", 30, 200),
+        SubredditConfig("CityPorn", 30, 200),
+        SubredditConfig("SkyPorn", 20, 100),
+        SubredditConfig("MinimalWallpaper", 20, 20),
+        SubredditConfig("ImaginaryLandscapes", 20, 100),
+    ]
+
+
+def _load_subreddit_configs() -> list[SubredditConfig]:
+    """Load subreddit configs from central config.yaml, falling back to defaults."""
+    if not HAS_CONFIG_LOADER:
+        return _default_subreddit_configs()
+
+    configured = get_central_config().get("sources.reddit.subreddits", [])
+    parsed: list[SubredditConfig] = []
+
+    for item in configured:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+
+        try:
+            fetch_count = int(item.get("fetch_count", 50))
+            min_upvotes = int(item.get("min_upvotes", 100))
+        except (TypeError, ValueError):
+            continue
+
+        parsed.append(SubredditConfig(name=name, fetch_count=fetch_count, min_upvotes=min_upvotes))
+
+    return parsed or _default_subreddit_configs()
+
+
+def _load_source_count(path: str, default: int) -> int:
+    """Read integer source counts from central config with fallback."""
+    if not HAS_CONFIG_LOADER:
+        return default
+
+    try:
+        value = int(get_central_config().get(path, default))
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class Config:
     """Central configuration for the wallpaper curation pipeline."""
@@ -79,25 +135,10 @@ class Config:
         get_central_config().get('quality.threshold', 5.5) if HAS_CONFIG_LOADER else 5.5
     )
     
-    # Subreddit configurations - Total: 400 wallpapers from Reddit
-    subreddits: list[SubredditConfig] = field(default_factory=lambda: [
-        SubredditConfig("WQHD_Wallpaper", 50, 100),    # New: High quality wallpapers
-        SubredditConfig("wallpaper", 50, 100),         # New: General wallpapers
-        SubredditConfig("AnimeLandscapes", 40, 100),   # New: Anime landscape wallpapers
-        SubredditConfig("Moescape", 40, 100),          # New: Anime scenic wallpapers
-        SubredditConfig("wallpapers", 35, 100),        # General wallpapers
-        SubredditConfig("EarthPorn", 35, 500),         # Nature photography
-        SubredditConfig("Amoledbackgrounds", 30, 50),  # AMOLED-friendly
-        SubredditConfig("spaceporn", 30, 200),         # Space photography
-        SubredditConfig("CityPorn", 30, 200),          # Urban photography
-        SubredditConfig("SkyPorn", 20, 100),           # Sky photography
-        SubredditConfig("MinimalWallpaper", 20, 20),   # Minimal design
-        SubredditConfig("ImaginaryLandscapes", 20, 100), # Fantasy art
-    ])
-    
-    # Candidate counts per source - increased for more wallpapers
-    unsplash_count: int = 100  # Increased from 30
-    pexels_count: int = 80     # Increased from 20
+    # Source allocations loaded from central config.yaml
+    subreddits: list[SubredditConfig] = field(default_factory=_load_subreddit_configs)
+    unsplash_count: int = field(default_factory=lambda: _load_source_count("sources.unsplash.count", 100))
+    pexels_count: int = field(default_factory=lambda: _load_source_count("sources.pexels.count", 80))
     
     # Wallpaper-friendly search queries (read from config.yaml)
     unsplash_search_query: str = field(default_factory=lambda:
