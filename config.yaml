@@ -68,7 +68,14 @@ sources:
     enabled: true
     count: 100  # Increased from 30 for more wallpapers
     search_query: "landscape nature scenery abstract mountains ocean sky"
+    search_queries:
+      - "landscape nature scenery abstract mountains ocean sky"
+      - "wallpaper landscape"
+      - "nature landscape"
+      - "mountains lake"
+      - "ocean sunset"
     orientation: "landscape"  # Filter for landscape-oriented images
+    relax_orientation_on_empty: true
     collections:
       - curated
       - nature
@@ -79,6 +86,30 @@ sources:
     count: 80  # Increased from 20 for more wallpapers
     search_query: "landscape nature scenery abstract mountains ocean sky"
     orientation: "landscape"  # Filter for landscape-oriented images
+
+  fourk:
+    collections:
+      - name: minimalism
+        url: "https://4kwallpapers.com/minimalism-wallpapers/"
+        fetch_count: 50
+
+  wallpapercat:
+    collections:
+      - name: dark
+        url: "https://wallpapercat.com/dark-wallpapers"
+        fetch_count: 40
+      - name: 4k
+        url: "https://wallpapercat.com/4k-wallpapers"
+        fetch_count: 40
+      - name: laptop
+        url: "https://wallpapercat.com/laptop-wallpapers"
+        fetch_count: 35
+      - name: dual-monitor
+        url: "https://wallpapercat.com/dual-monitor-wallpapers"
+        fetch_count: 25
+      - name: matte-black
+        url: "https://wallpapercat.com/matte-black-wallpapers"
+        fetch_count: 30
 
 # -----------------------------------------------------------------------------
 # Hard Filter Configuration
@@ -340,4 +371,3 @@ smoke_test:
   
   # Max runtime
   max_runtime_sec: 120
-

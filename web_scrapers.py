@@ -28,7 +28,15 @@ if TYPE_CHECKING:
     from dedup_manager import DuplicateChecker
 
 try:
+    from config_loader import get_config as get_central_config
+
+    HAS_CONFIG_LOADER = True
+except ImportError:
+    HAS_CONFIG_LOADER = False
+
+try:
     from bs4 import BeautifulSoup
+
     HAS_BEAUTIFULSOUP = True
 except ImportError:
     HAS_BEAUTIFULSOUP = False
@@ -38,13 +46,76 @@ except ImportError:
 logger = logging.getLogger("wallpaper_curator")
 
 
+def _default_fourk_sources() -> list["ScrapingSourceConfig"]:
+    return [
+        ScrapingSourceConfig(
+            "minimalism", "https://4kwallpapers.com/minimalism-wallpapers/", 50
+        ),
+    ]
+
+
+def _default_wallpapercat_sources() -> list["ScrapingSourceConfig"]:
+    return [
+        ScrapingSourceConfig("dark", "https://wallpapercat.com/dark-wallpapers", 40),
+        ScrapingSourceConfig("4k", "https://wallpapercat.com/4k-wallpapers", 40),
+        ScrapingSourceConfig(
+            "laptop", "https://wallpapercat.com/laptop-wallpapers", 35
+        ),
+        ScrapingSourceConfig(
+            "dual-monitor", "https://wallpapercat.com/dual-monitor-wallpapers", 25
+        ),
+        ScrapingSourceConfig(
+            "matte-black", "https://wallpapercat.com/matte-black-wallpapers", 30
+        ),
+    ]
+
+
+def _load_scraping_sources(
+    path: str,
+    fallback_factory,
+) -> list["ScrapingSourceConfig"]:
+    if not HAS_CONFIG_LOADER:
+        return fallback_factory()
+
+    raw_sources = get_central_config().get(path, [])
+    parsed: list[ScrapingSourceConfig] = []
+
+    for item in raw_sources:
+        if not isinstance(item, dict):
+            continue
+
+        name = str(item.get("name", "")).strip()
+        url = str(item.get("url", "")).strip()
+        if not name or not url:
+            continue
+
+        try:
+            fetch_count = int(item.get("fetch_count", 50))
+        except (TypeError, ValueError):
+            fetch_count = 50
+
+        enabled = bool(item.get("enabled", True))
+        parsed.append(
+            ScrapingSourceConfig(
+                name=name,
+                url=url,
+                fetch_count=fetch_count,
+                enabled=enabled,
+            )
+        )
+
+    return parsed or fallback_factory()
+
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
+
 @dataclass
 class ScrapingSourceConfig:
     """Configuration for a web scraping source."""
+
     name: str
     url: str
     fetch_count: int = 50
@@ -56,16 +127,20 @@ class WebScrapingConfig:
     """Configuration for all web scraping sources."""
 
     # 4KWallpapers.com sources
-    fourk_sources: list[ScrapingSourceConfig] = field(default_factory=lambda: [
-        ScrapingSourceConfig("minimalism", "https://4kwallpapers.com/minimalism-wallpapers/", 50),
-    ])
+    fourk_sources: list[ScrapingSourceConfig] = field(
+        default_factory=lambda: _load_scraping_sources(
+            "sources.fourk.collections",
+            _default_fourk_sources,
+        )
+    )
 
     # WallpaperCat.com sources
-    wallpapercat_sources: list[ScrapingSourceConfig] = field(default_factory=lambda: [
-        ScrapingSourceConfig("studio-ghibli", "https://wallpapercat.com/studio-ghibli-wallpapers", 50),
-        ScrapingSourceConfig("desktop", "https://wallpapercat.com/desktop", 50),
-        ScrapingSourceConfig("wind-rises", "https://wallpapercat.com/the-wind-rises-wallpapers", 28),
-    ])
+    wallpapercat_sources: list[ScrapingSourceConfig] = field(
+        default_factory=lambda: _load_scraping_sources(
+            "sources.wallpapercat.collections",
+            _default_wallpapercat_sources,
+        )
+    )
 
     # Rate limiting - delay between page requests to same domain
     request_delay: float = 2.0
@@ -77,6 +152,7 @@ class WebScrapingConfig:
 # =============================================================================
 # 4KWALLPAPERS.COM FETCHER
 # =============================================================================
+
 
 class FourKWallpapersFetcher:
     """
@@ -120,7 +196,9 @@ class FourKWallpapersFetcher:
         try:
             async with session.get(url, headers=self.headers, timeout=30) as response:
                 if response.status != 200:
-                    logger.warning(f"4KWallpapers page returned {response.status}: {url}")
+                    logger.warning(
+                        f"4KWallpapers page returned {response.status}: {url}"
+                    )
                     return []
 
                 html = await response.text()
@@ -130,7 +208,9 @@ class FourKWallpapersFetcher:
                 else:
                     wallpapers = self._extract_with_regex(html, url)
 
-                logger.debug(f"4KWallpapers: Extracted {len(wallpapers)} wallpapers from {url}")
+                logger.debug(
+                    f"4KWallpapers: Extracted {len(wallpapers)} wallpapers from {url}"
+                )
 
         except asyncio.TimeoutError:
             logger.warning(f"4KWallpapers timeout: {url}")
@@ -139,14 +219,23 @@ class FourKWallpapersFetcher:
 
         return wallpapers
 
-    def _extract_with_beautifulsoup(self, html: str, source_url: str) -> list[dict[str, Any]]:
+    def _extract_with_beautifulsoup(
+        self, html: str, source_url: str
+    ) -> list[dict[str, Any]]:
         """Extract wallpapers using BeautifulSoup for accurate parsing."""
         wallpapers = []
-        soup = BeautifulSoup(html, "lxml" if "lxml" in str(type(BeautifulSoup)) else "html.parser")
+        soup = BeautifulSoup(
+            html, "lxml" if "lxml" in str(type(BeautifulSoup)) else "html.parser"
+        )
 
         # Find all download links - they have href starting with /images/wallpapers/
         # and contain "Download" text
-        download_links = soup.find_all("a", href=re.compile(r"^/images/wallpapers/.*\.(jpg|jpeg|png|webp)$", re.IGNORECASE))
+        download_links = soup.find_all(
+            "a",
+            href=re.compile(
+                r"^/images/wallpapers/.*\.(jpg|jpeg|png|webp)$", re.IGNORECASE
+            ),
+        )
 
         found_urls = set()
         for link in download_links:
@@ -169,7 +258,11 @@ class FourKWallpapersFetcher:
             # Pattern: /images/wallpapers/black-panther-minimal-art-black-background-3840x2160-2762.png
             filename = href.split("/")[-1]
             id_match = re.search(r"-(\d+)\.\w+$", filename)
-            wallpaper_id = id_match.group(1) if id_match else hashlib.md5(href.encode()).hexdigest()[:8]
+            wallpaper_id = (
+                id_match.group(1)
+                if id_match
+                else hashlib.md5(href.encode()).hexdigest()[:8]
+            )
 
             # Extract resolution from filename if present (e.g., 3840x2160)
             resolution_match = re.search(r"-(\d{3,5}x\d{3,5})-", filename)
@@ -178,16 +271,20 @@ class FourKWallpapersFetcher:
             # Build title from filename (remove resolution and ID parts)
             title_part = filename.rsplit(".", 1)[0]  # Remove extension
             title_part = re.sub(r"-\d+$", "", title_part)  # Remove ID
-            title_part = re.sub(r"-\d{3,5}x\d{3,5}", "", title_part)  # Remove resolution
+            title_part = re.sub(
+                r"-\d{3,5}x\d{3,5}", "", title_part
+            )  # Remove resolution
             title = title_part.replace("-", " ").strip().title()
 
-            wallpapers.append({
-                "id": wallpaper_id,
-                "url": img_url,
-                "title": title or "Wallpaper",
-                "resolution": resolution,
-                "source_page": source_url,
-            })
+            wallpapers.append(
+                {
+                    "id": wallpaper_id,
+                    "url": img_url,
+                    "title": title or "Wallpaper",
+                    "resolution": resolution,
+                    "source_page": source_url,
+                }
+            )
 
         return wallpapers
 
@@ -199,7 +296,7 @@ class FourKWallpapersFetcher:
         # Pattern matches: href="/images/wallpapers/filename.ext"
         pattern = re.compile(
             r'href="(/images/wallpapers/([^"]+\.(jpg|jpeg|png|webp)))"[^>]*>Download',
-            re.IGNORECASE
+            re.IGNORECASE,
         )
 
         found_urls = set()
@@ -214,7 +311,11 @@ class FourKWallpapersFetcher:
 
             # Extract ID from filename
             id_match = re.search(r"-(\d+)\.\w+$", filename)
-            wallpaper_id = id_match.group(1) if id_match else hashlib.md5(href.encode()).hexdigest()[:8]
+            wallpaper_id = (
+                id_match.group(1)
+                if id_match
+                else hashlib.md5(href.encode()).hexdigest()[:8]
+            )
 
             # Extract resolution
             resolution_match = re.search(r"-(\d{3,5}x\d{3,5})-", filename)
@@ -226,13 +327,15 @@ class FourKWallpapersFetcher:
             title_part = re.sub(r"-\d{3,5}x\d{3,5}", "", title_part)
             title = title_part.replace("-", " ").strip().title()
 
-            wallpapers.append({
-                "id": wallpaper_id,
-                "url": img_url,
-                "title": title or "Wallpaper",
-                "resolution": resolution,
-                "source_page": source_url,
-            })
+            wallpapers.append(
+                {
+                    "id": wallpaper_id,
+                    "url": img_url,
+                    "title": title or "Wallpaper",
+                    "resolution": resolution,
+                    "source_page": source_url,
+                }
+            )
 
         return wallpapers
 
@@ -250,7 +353,9 @@ class FourKWallpapersFetcher:
         page = 1
         max_pages = 20  # Safety limit
 
-        logger.info(f"4KWallpapers: Fetching from '{source.name}' (target: {source.fetch_count})")
+        logger.info(
+            f"4KWallpapers: Fetching from '{source.name}' (target: {source.fetch_count})"
+        )
 
         while len(all_wallpapers) < source.fetch_count and page <= max_pages:
             # Build paginated URL
@@ -283,7 +388,9 @@ class FourKWallpapersFetcher:
                 wp["full_id"] = full_id
                 all_wallpapers.append(wp)
 
-            logger.info(f"  Page {page}: {len(page_wallpapers)} found, {skipped} duplicates skipped. Total: {len(all_wallpapers)}")
+            logger.info(
+                f"  Page {page}: {len(page_wallpapers)} found, {skipped} duplicates skipped. Total: {len(all_wallpapers)}"
+            )
 
             page += 1
             await asyncio.sleep(self.config.request_delay)
@@ -312,6 +419,7 @@ class FourKWallpapersFetcher:
 # =============================================================================
 # WALLPAPERCAT.COM FETCHER
 # =============================================================================
+
 
 class WallpaperCatFetcher:
     """
@@ -343,7 +451,7 @@ class WallpaperCatFetcher:
         Fetch a collection page and extract ALL wallpaper URLs from the grid.
 
         Wallpaper links have format:
-        <a class="ui fluid image image_popup_trigger ads_popup" data-id="5823589" 
+        <a class="ui fluid image image_popup_trigger ads_popup" data-id="5823589"
            href="/w/full/c/7/e/5823589-2920x1640-desktop-hd-boy-programmer-wallpaper-image.jpg">
 
         Returns list of wallpaper info dicts.
@@ -353,20 +461,32 @@ class WallpaperCatFetcher:
         try:
             async with session.get(url, headers=self.headers, timeout=30) as response:
                 if response.status != 200:
-                    logger.warning(f"WallpaperCat page returned {response.status}: {url}")
+                    logger.warning(
+                        f"WallpaperCat page returned {response.status}: {url}"
+                    )
                     return []
 
                 html = await response.text()
 
                 # Extract collection name from URL for context
-                collection_name = urlparse(url).path.strip("/").replace("-wallpapers", "").replace("-", " ").title()
+                collection_name = (
+                    urlparse(url)
+                    .path.strip("/")
+                    .replace("-wallpapers", "")
+                    .replace("-", " ")
+                    .title()
+                )
 
                 if HAS_BEAUTIFULSOUP:
-                    wallpapers = self._extract_with_beautifulsoup(html, url, collection_name)
+                    wallpapers = self._extract_with_beautifulsoup(
+                        html, url, collection_name
+                    )
                 else:
                     wallpapers = self._extract_with_regex(html, url, collection_name)
 
-                logger.debug(f"WallpaperCat: Extracted {len(wallpapers)} wallpapers from {url}")
+                logger.debug(
+                    f"WallpaperCat: Extracted {len(wallpapers)} wallpapers from {url}"
+                )
 
         except asyncio.TimeoutError:
             logger.warning(f"WallpaperCat timeout: {url}")
@@ -375,16 +495,22 @@ class WallpaperCatFetcher:
 
         return wallpapers
 
-    def _extract_with_beautifulsoup(self, html: str, source_url: str, collection_name: str) -> list[dict[str, Any]]:
+    def _extract_with_beautifulsoup(
+        self, html: str, source_url: str, collection_name: str
+    ) -> list[dict[str, Any]]:
         """Extract wallpapers using BeautifulSoup for accurate parsing."""
         wallpapers = []
-        soup = BeautifulSoup(html, "lxml" if "lxml" in str(type(BeautifulSoup)) else "html.parser")
+        soup = BeautifulSoup(
+            html, "lxml" if "lxml" in str(type(BeautifulSoup)) else "html.parser"
+        )
 
         found_urls = set()
 
         # Method 1: Find anchor links with class "image_popup_trigger" (desktop page style)
         # Pattern: <a class="... image_popup_trigger ..." data-id="ID" href="/w/full/...">
-        wallpaper_links = soup.find_all("a", class_=re.compile(r"image_popup_trigger", re.IGNORECASE))
+        wallpaper_links = soup.find_all(
+            "a", class_=re.compile(r"image_popup_trigger", re.IGNORECASE)
+        )
 
         for link in wallpaper_links:
             href = link.get("href", "")
@@ -424,7 +550,9 @@ class WallpaperCatFetcher:
 
         return wallpapers
 
-    def _parse_wallpaper_url(self, url_path: str, data_id: str, collection_name: str, source_url: str) -> Optional[dict[str, Any]]:
+    def _parse_wallpaper_url(
+        self, url_path: str, data_id: str, collection_name: str, source_url: str
+    ) -> Optional[dict[str, Any]]:
         """Parse a wallpaper URL path into a wallpaper dict."""
         # Build full URL
         img_url = f"{self.BASE_URL}{url_path}"
@@ -437,7 +565,11 @@ class WallpaperCatFetcher:
             # or from path like /w/full/7/7/4/1198914-...
             filename = url_path.split("/")[-1]
             id_match = re.search(r"^(\d+)", filename)
-            wallpaper_id = id_match.group(1) if id_match else hashlib.md5(url_path.encode()).hexdigest()[:8]
+            wallpaper_id = (
+                id_match.group(1)
+                if id_match
+                else hashlib.md5(url_path.encode()).hexdigest()[:8]
+            )
 
         # Extract resolution and title from filename
         filename = url_path.split("/")[-1]
@@ -455,7 +587,15 @@ class WallpaperCatFetcher:
                     break
 
             # Build title - skip ID, resolution, and common filter words
-            skip_words = {"4k", "hd", "desktop", "wallpaper", "background", "photo", "image"}
+            skip_words = {
+                "4k",
+                "hd",
+                "desktop",
+                "wallpaper",
+                "background",
+                "photo",
+                "image",
+            }
             title_parts = []
             for part in parts[1:]:  # Skip first part (ID)
                 if re.match(r"^\d{3,5}x\d{3,5}$", part):
@@ -476,7 +616,9 @@ class WallpaperCatFetcher:
             "source_page": source_url,
         }
 
-    def _extract_with_regex(self, html: str, source_url: str, collection_name: str) -> list[dict[str, Any]]:
+    def _extract_with_regex(
+        self, html: str, source_url: str, collection_name: str
+    ) -> list[dict[str, Any]]:
         """Fallback regex extraction if BeautifulSoup not available."""
         wallpapers = []
         found_urls = set()
@@ -485,7 +627,7 @@ class WallpaperCatFetcher:
         # <a class="... image_popup_trigger ..." data-id="ID" href="/w/full/path.jpg">
         anchor_pattern = re.compile(
             r'<a\s+[^>]*class="[^"]*image_popup_trigger[^"]*"[^>]*data-id="(\d+)"[^>]*href="(/w/full/[^"]+)"',
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         )
 
         for match in anchor_pattern.finditer(html):
@@ -501,20 +643,21 @@ class WallpaperCatFetcher:
             resolution_match = re.search(r"-(\d{3,5}x\d{3,5})-", filename)
             resolution = resolution_match.group(1) if resolution_match else None
 
-            wallpapers.append({
-                "id": data_id,
-                "url": img_url,
-                "title": collection_name,
-                "resolution": resolution,
-                "collection": collection_name,
-                "source_page": source_url,
-            })
+            wallpapers.append(
+                {
+                    "id": data_id,
+                    "url": img_url,
+                    "title": collection_name,
+                    "resolution": resolution,
+                    "collection": collection_name,
+                    "source_page": source_url,
+                }
+            )
 
         # Method 2: Pattern for img tags with src="/w/full/..." (collection pages)
         # <img src="/w/full/7/7/4/1198914-2560x1440-desktop-hd-studio-ghibli-wallpaper-photo.jpg">
         img_pattern = re.compile(
-            r'<img\s+[^>]*src="(/w/full/[^"]+\.(jpg|jpeg|png|webp))"',
-            re.IGNORECASE
+            r'<img\s+[^>]*src="(/w/full/[^"]+\.(jpg|jpeg|png|webp))"', re.IGNORECASE
         )
 
         for match in img_pattern.finditer(html):
@@ -529,19 +672,25 @@ class WallpaperCatFetcher:
 
             # Extract ID from filename
             id_match = re.search(r"^(\d+)", filename)
-            wallpaper_id = id_match.group(1) if id_match else hashlib.md5(src.encode()).hexdigest()[:8]
+            wallpaper_id = (
+                id_match.group(1)
+                if id_match
+                else hashlib.md5(src.encode()).hexdigest()[:8]
+            )
 
             resolution_match = re.search(r"-(\d{3,5}x\d{3,5})-", filename)
             resolution = resolution_match.group(1) if resolution_match else None
 
-            wallpapers.append({
-                "id": wallpaper_id,
-                "url": img_url,
-                "title": collection_name,
-                "resolution": resolution,
-                "collection": collection_name,
-                "source_page": source_url,
-            })
+            wallpapers.append(
+                {
+                    "id": wallpaper_id,
+                    "url": img_url,
+                    "title": collection_name,
+                    "resolution": resolution,
+                    "collection": collection_name,
+                    "source_page": source_url,
+                }
+            )
 
         return wallpapers
 
@@ -555,7 +704,9 @@ class WallpaperCatFetcher:
         Fetch wallpapers from a single WallpaperCat collection.
         WallpaperCat shows all wallpapers on one page (no pagination needed).
         """
-        logger.info(f"WallpaperCat: Fetching from '{source.name}' (target: {source.fetch_count})")
+        logger.info(
+            f"WallpaperCat: Fetching from '{source.name}' (target: {source.fetch_count})"
+        )
 
         page_wallpapers = await self.fetch_page(session, source.url)
 
@@ -579,7 +730,9 @@ class WallpaperCatFetcher:
             wp["full_id"] = full_id
             all_wallpapers.append(wp)
 
-        logger.info(f"  Found {len(page_wallpapers)}, {skipped} duplicates skipped. Using: {len(all_wallpapers)}")
+        logger.info(
+            f"  Found {len(page_wallpapers)}, {skipped} duplicates skipped. Using: {len(all_wallpapers)}"
+        )
 
         return all_wallpapers
 
@@ -609,6 +762,7 @@ class WallpaperCatFetcher:
 # PARALLEL/ALTERNATE SCRAPING COORDINATOR
 # =============================================================================
 
+
 class WebScrapingCoordinator:
     """
     Coordinates scraping from multiple sources in parallel/alternating fashion.
@@ -636,7 +790,9 @@ class WebScrapingCoordinator:
         a list of wallpaper dicts.
         """
         if not HAS_BEAUTIFULSOUP:
-            logger.warning("BeautifulSoup4 not installed. Web scraping will use regex fallback.")
+            logger.warning(
+                "BeautifulSoup4 not installed. Web scraping will use regex fallback."
+            )
 
         # Run both fetchers concurrently
         fourk_task = asyncio.create_task(
@@ -647,13 +803,16 @@ class WebScrapingCoordinator:
         )
 
         fourk_results, wallpapercat_results = await asyncio.gather(
-            fourk_task, wallpapercat_task,
-            return_exceptions=True
+            fourk_task, wallpapercat_task, return_exceptions=True
         )
 
         results = {
-            "4kwallpapers": fourk_results if not isinstance(fourk_results, Exception) else [],
-            "wallpapercat": wallpapercat_results if not isinstance(wallpapercat_results, Exception) else [],
+            "4kwallpapers": fourk_results
+            if not isinstance(fourk_results, Exception)
+            else [],
+            "wallpapercat": wallpapercat_results
+            if not isinstance(wallpapercat_results, Exception)
+            else [],
         }
 
         if isinstance(fourk_results, Exception):
@@ -716,6 +875,7 @@ class WebScrapingCoordinator:
 # UTILITY FUNCTIONS
 # =============================================================================
 
+
 def check_dependencies() -> bool:
     """Check if required dependencies are installed."""
     if not HAS_BEAUTIFULSOUP:
@@ -730,6 +890,7 @@ def check_dependencies() -> bool:
 # =============================================================================
 # STANDALONE TEST
 # =============================================================================
+
 
 async def _test_scraping():
     """Test the web scrapers."""
