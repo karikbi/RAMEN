@@ -24,21 +24,23 @@ logger = logging.getLogger("wallpaper_curator")
 
 def _extract_siglip_tensor(output):
     """Extract tensor from SigLIP model output.
-    
+
     Handles both raw tensor returns and BaseModelOutputWithPooling objects
     that may be returned by newer transformers versions.
     """
-    if hasattr(output, 'image_embeds') and output.image_embeds is not None:
+    if hasattr(output, "image_embeds") and output.image_embeds is not None:
         return output.image_embeds
-    elif hasattr(output, 'text_embeds') and output.text_embeds is not None:
+    elif hasattr(output, "text_embeds") and output.text_embeds is not None:
         return output.text_embeds
-    elif hasattr(output, 'pooler_output') and output.pooler_output is not None:
+    elif hasattr(output, "pooler_output") and output.pooler_output is not None:
         return output.pooler_output
-    elif hasattr(output, 'last_hidden_state'):
+    elif hasattr(output, "last_hidden_state"):
         return output.last_hidden_state[:, 0]  # CLS token
     elif isinstance(output, (tuple, list)) and len(output) > 0:
         return _extract_siglip_tensor(output[0])
     return output  # Already a tensor
+
+
 # =============================================================================
 # VOCABULARY DEFINITIONS
 # =============================================================================
@@ -54,36 +56,30 @@ CATEGORY_VOCABULARY = {
     "animals": "a photo featuring animals, wildlife, birds, or creatures in their habitat",
     "underwater": "an underwater photo of the ocean depths, marine life, or coral reefs",
     "aerial": "an aerial view photo taken from a drone or bird's eye perspective",
-    
     # Landscape-Specific
     "mountains": "towering mountain peaks with snow caps, alpine valleys, dramatic ridgelines",
     "beach": "sandy beach shoreline with ocean waves, palm trees, coastal sunset",
     "forest": "dense woodland with tall trees, forest path, dappled sunlight through canopy",
     "desert": "arid sand dunes, barren desert landscape, cacti, dry cracked earth",
     "ocean": "vast open ocean seascape, rolling waves, deep blue water horizon",
-    
     # Urban & Architecture
     "urban": "a photo of a city skyline, urban street, or metropolitan architecture",
     "architecture": "a photo focusing on modern building design, structures, or geometry",
     "automotive": "a photo of cars, motorcycles, or vehicles in a cinematic style",
-    
     # Art & Design
     "abstract": "an abstract image with geometric patterns, shapes, or non-representational designs",
     "minimalist": "a minimalist image with simple composition and negative space",
     "art": "a piece of digital art, illustration, painting, or concept art",
     "anime": "an anime or manga style illustration with japanese animation aesthetics",
     "vintage": "photo with Kodak film grain texture, 1970s faded color grading, light leaks, and analog camera vignetting",
-    
     # Photography Styles
     "macro": "extreme close-up macro photography of tiny subjects, insects, water droplets, textures",
     "portrait": "portrait photography with shallow depth of field, face or figure as subject",
     "long_exposure": "long exposure photography with light trails, smooth water, star trails, motion blur",
     "bokeh": "dreamy bokeh background with circular blurred lights, shallow depth of field",
-    
     # Technology & Gaming
     "technology": "a futuristic image with cyberpunk, neon, or sci-fi technology themes",
     "gaming": "a video game screenshot or gaming-related digital artwork",
-    
     # Themes
     "dark": "a dark, low-key image suitable for AMOLED screens with black backgrounds",
     "colorful": "a vibrant, highly saturated image with bright rainbow colors",
@@ -91,19 +87,16 @@ CATEGORY_VOCABULARY = {
     "horror": "dark eerie horror aesthetic, haunted atmosphere, creepy shadows, fog",
     "romantic": "romantic dreamy scene, couples silhouette, sunset, roses, soft lighting",
     "sports": "dynamic sports action photography, athletes in motion, stadium, competition",
-    
     # Cultural & Places
     "japanese": "japanese aesthetic with cherry blossoms, torii gates, temples, zen gardens",
     "european": "european architecture, cobblestone streets, historic buildings, cathedrals",
     "tropical": "lush tropical paradise with palm trees, exotic flowers, turquoise water",
     "nordic": "scandinavian nordic landscape, fjords, aurora borealis, snow, pine forests",
-    
     # Modern Aesthetics
     "neon": "neon lights and signs glowing in darkness, vibrant electric colors",
     "gradient": "smooth color gradient background, soft color transitions, abstract blend",
     "3d_render": "3D rendered digital art, CGI scene, geometric shapes, modern 3D graphics",
     "vector": "flat vector art illustration, clean lines, bold shapes, graphic design style",
-    
     # Seasonal & Weather
     "seasonal": "a seasonal image showing spring, summer, autumn leaves, or winter snow",
     "weather": "a photo featuring weather elements like rain, storms, lightning, or clouds",
@@ -164,14 +157,13 @@ STYLE_VOCABULARY = {
 
 LABEL_SPECIFICITY_PENALTIES = {
     # Moods - vague emotional terms that match many images
-    "epic": 0.65,        # 35% penalty - was matching 97% of images
-    "inspiring": 0.75,   # 25% penalty - was matching 41% of images
+    "epic": 0.65,  # 35% penalty - was matching 97% of images
+    "inspiring": 0.75,  # 25% penalty - was matching 41% of images
     "mysterious": 0.80,  # 20% penalty - was matching 29% of images
-    
     # Styles - developer theme names with weak visual grounding
-    "dracula": 0.55,     # 45% penalty - was matching 62% of images
+    "dracula": 0.55,  # 45% penalty - was matching 62% of images
     "catppuccin": 0.55,  # 45% penalty - was matching 59% of images
-    "monokai": 0.65,     # 35% penalty - was matching 41% of images
+    "monokai": 0.65,  # 35% penalty - was matching 41% of images
 }
 
 # Categories that tend to win low-confidence classifications
@@ -194,29 +186,31 @@ COMPOSITION_VOCABULARY = {
 # DATA MODELS
 # =============================================================================
 
+
 @dataclass
 class ExtractedMetadata:
     """Container for all extracted metadata."""
+
     # Category classification
     primary_category: str = ""
     subcategories: List[str] = field(default_factory=list)
     category_confidence: float = 0.0
-    
+
     # Mood and style
     mood_tags: List[str] = field(default_factory=list)
     style_tags: List[str] = field(default_factory=list)
-    
+
     # Composition
     composition_type: str = ""
     symmetry_score: float = 0.0
     focal_point: Tuple[float, float] = (0.5, 0.5)
     focal_point_method: str = "gradient"  # "dinov3" or "gradient"
-    
+
     # Colors
     color_palette: List[str] = field(default_factory=list)
     dominant_hue: int = 0
     color_diversity: float = 0.0
-    
+
     # Brightness and contrast
     brightness: int = 128
     contrast: float = 50.0
@@ -227,24 +221,25 @@ class ExtractedMetadata:
 # MAIN EXTRACTOR CLASS
 # =============================================================================
 
+
 class MetadataExtractor:
     """
     Training-free metadata extraction using embedding models.
-    
+
     Reuses already-loaded models from EmbeddingExtractor and MLQualityScorer.
     """
-    
+
     def __init__(
         self,
         siglip_model=None,
         siglip_processor=None,
         dinov3_model=None,
         dinov3_processor=None,
-        device: str = "cpu"
+        device: str = "cpu",
     ):
         """
         Initialize metadata extractor with pre-loaded models.
-        
+
         Args:
             siglip_model: Pre-loaded SigLIP model
             siglip_processor: Pre-loaded SigLIP processor
@@ -257,36 +252,36 @@ class MetadataExtractor:
         self.dinov3_model = dinov3_model
         self.dinov3_processor = dinov3_processor
         self.device = device
-        
+
         # SigLIP parameters for probability calculation
         self.logit_scale = None
         self.logit_bias = None
-        
+
         # Precomputed text embeddings (lazy loading)
         self._category_embeddings = None
         self._mood_embeddings = None
         self._style_embeddings = None
         self._composition_embeddings = None
         self._text_embeddings_ready = False
-        
+
         # Extract params and precompute text embeddings if SigLIP available now
         self._ensure_text_embeddings()
-    
+
     def set_siglip_model(self, siglip_model, siglip_processor, device: str = None):
         """
         Set or update SigLIP model after initialization.
-        
+
         This is useful when SigLIP is lazy-loaded elsewhere and becomes available later.
         """
         self.siglip_model = siglip_model
         self.siglip_processor = siglip_processor
         if device:
             self.device = device
-        
+
         # Reset and precompute text embeddings
         self._text_embeddings_ready = False
         self._ensure_text_embeddings()
-    
+
     def _extract_siglip_params(self):
         """Extract logit_scale and logit_bias from SigLIP model."""
         if self.siglip_model is None:
@@ -298,44 +293,52 @@ class MetadataExtractor:
                 self.logit_scale = self.siglip_model.logit_scale.item()
                 if hasattr(self.siglip_model, "logit_bias"):
                     # logit_bias is usually a vector in training, but scalar scalar for inference?
-                    # Check shape. If vector, maybe take mean or 0? 
+                    # Check shape. If vector, maybe take mean or 0?
                     # SigLIP paper uses a scalar bias per class, but for zero-shot we often rely on the dot product.
                     # HuggingFace implem often has logit_bias as scalar or None.
                     bias = self.siglip_model.logit_bias
                     if hasattr(bias, "item"):
                         self.logit_bias = bias.item()
                     else:
-                        self.logit_bias = 0.0 # Default fallback
-            
-            logger.info(f"Extracted SigLIP params: scale={self.logit_scale}, bias={self.logit_bias}")
+                        self.logit_bias = 0.0  # Default fallback
+
+            logger.info(
+                f"Extracted SigLIP params: scale={self.logit_scale}, bias={self.logit_bias}"
+            )
         except Exception as e:
             logger.warning(f"Failed to extract SigLIP params: {e}. Using defaults.")
-            self.logit_scale = np.log(10) # Default approximate scale
-            self.logit_bias = -10 # Default bias
-    
+            self.logit_scale = np.log(10)  # Default approximate scale
+            self.logit_bias = -10  # Default bias
+
     def _ensure_text_embeddings(self) -> bool:
         """
         Ensure text embeddings are precomputed. Called lazily when needed.
-        
+
         Returns:
             True if text embeddings are ready, False otherwise.
         """
         if self._text_embeddings_ready:
             return True
-        
+
         if self.siglip_model is None or self.siglip_processor is None:
-            logger.debug("Cannot precompute text embeddings: SigLIP model not available")
+            logger.debug(
+                "Cannot precompute text embeddings: SigLIP model not available"
+            )
             return False
-            
+
         # Extract model params first
         self._extract_siglip_params()
-        
+
         logger.info("Precomputing text embeddings for zero-shot classification...")
-        self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
+        self._category_embeddings = self._precompute_text_embeddings(
+            CATEGORY_VOCABULARY
+        )
         self._mood_embeddings = self._precompute_text_embeddings(MOOD_VOCABULARY)
         self._style_embeddings = self._precompute_text_embeddings(STYLE_VOCABULARY)
-        self._composition_embeddings = self._precompute_text_embeddings(COMPOSITION_VOCABULARY)
-        
+        self._composition_embeddings = self._precompute_text_embeddings(
+            COMPOSITION_VOCABULARY
+        )
+
         # Check if any succeeded
         if self._category_embeddings is not None:
             self._text_embeddings_ready = True
@@ -344,12 +347,14 @@ class MetadataExtractor:
         else:
             logger.warning("Failed to precompute text embeddings")
             return False
-    
+
     @classmethod
-    def from_embedding_extractor(cls, embedding_extractor, quality_scorer=None) -> "MetadataExtractor":
+    def from_embedding_extractor(
+        cls, embedding_extractor, quality_scorer=None
+    ) -> "MetadataExtractor":
         """
         Create MetadataExtractor from existing EmbeddingExtractor instance.
-        
+
         Args:
             embedding_extractor: EmbeddingExtractor with loaded models
             quality_scorer: Optional MLQualityScorer for SigLIP access
@@ -357,57 +362,56 @@ class MetadataExtractor:
         # Get SigLIP from quality scorer if available (it's already loaded there)
         siglip_model = None
         siglip_processor = None
-        
+
         if quality_scorer is not None:
-            siglip_model = getattr(quality_scorer, '_siglip_model', None)
-            siglip_processor = getattr(quality_scorer, '_siglip_processor', None)
-        
+            siglip_model = getattr(quality_scorer, "_siglip_model", None)
+            siglip_processor = getattr(quality_scorer, "_siglip_processor", None)
+
         # Get DINOv3 from embedding extractor
-        dinov3_model = getattr(embedding_extractor, '_dinov3_model', None)
-        dinov3_processor = getattr(embedding_extractor, '_dinov3_processor', None)
-        
+        dinov3_model = getattr(embedding_extractor, "_dinov3_model", None)
+        dinov3_processor = getattr(embedding_extractor, "_dinov3_processor", None)
+
         return cls(
             siglip_model=siglip_model,
             siglip_processor=siglip_processor,
             dinov3_model=dinov3_model,
             dinov3_processor=dinov3_processor,
-            device=embedding_extractor.device
+            device=embedding_extractor.device,
         )
-    
+
     # =========================================================================
     # SIGLIP ZERO-SHOT CLASSIFICATION
     # =========================================================================
-    
+
     def _precompute_text_embeddings(self, vocabulary: dict) -> Optional[np.ndarray]:
         """Precompute text embeddings for a vocabulary."""
         if self.siglip_model is None or self.siglip_processor is None:
             return None
-        
+
         try:
             import torch
             import torch.nn.functional as F
-            
+
             texts = list(vocabulary.values())
             text_inputs = self.siglip_processor(
-                text=texts,
-                padding=True,
-                return_tensors="pt"
+                text=texts, padding=True, return_tensors="pt"
             )
-            
+
             if self.device == "cuda":
                 text_inputs = {k: v.cuda() for k, v in text_inputs.items()}
             elif self.device == "mps":
                 text_inputs = {k: v.to("mps") for k, v in text_inputs.items()}
-            
+
             with torch.no_grad():
                 text_features = self.siglip_model.get_text_features(**text_inputs)
+                text_features = _extract_siglip_tensor(text_features)
                 text_features = F.normalize(text_features, dim=-1)
-            
+
             return text_features.cpu().numpy()
         except Exception as e:
             logger.warning(f"Failed to precompute text embeddings: {e}")
             return None
-    
+
     def _classify_against_vocabulary(
         self,
         image_embedding: np.ndarray,
@@ -415,11 +419,11 @@ class MetadataExtractor:
         precomputed_embeddings: Optional[np.ndarray],
         top_k: int = 2,
         threshold: float = 0.5,
-        method: str = "multi_label"  # "multi_label" or "single_label"
+        method: str = "multi_label",  # "multi_label" or "single_label"
     ) -> List[Tuple[str, float]]:
         """
         Classify image against a vocabulary.
-        
+
         Args:
             image_embedding: Image embedding vector
             vocabulary: Dict of {label: prompt}
@@ -427,18 +431,18 @@ class MetadataExtractor:
             top_k: Number of results to return
             threshold: Probability threshold (for multi_label)
             method: "multi_label" (independent sigmoid) or "single_label" (softmax)
-            
+
         Returns:
             List of (label, score) tuples
         """
         if precomputed_embeddings is None:
             logger.debug("Classification skipped: precomputed_embeddings is None")
             return []
-        
+
         try:
             # Ensure consistent dtype
             image_embedding = image_embedding.astype(np.float32)
-            
+
             # CRITICAL: Normalize image embedding to unit length
             # This ensures dot product with normalized text embeddings = true cosine similarity
             # Without this, unnormalized embeddings produce artificially low values
@@ -448,177 +452,195 @@ class MetadataExtractor:
             else:
                 logger.warning("Image embedding has near-zero norm, cannot normalize")
                 return []
-            
+
             # Compute raw logits (cosine similarity since both normalized)
             # Range [-1, 1], typically [0.15, 0.30] for matches
             logits = np.dot(precomputed_embeddings, image_embedding)
-            
+
             # Log raw statistics to debug low probabilities
             if logger.isEnabledFor(logging.DEBUG):
                 l_min, l_max, l_mean = np.min(logits), np.max(logits), np.mean(logits)
-                logger.debug(f"Raw logits (cos sim): min={l_min:.4f}, max={l_max:.4f}, mean={l_mean:.4f}")
+                logger.debug(
+                    f"Raw logits (cos sim): min={l_min:.4f}, max={l_max:.4f}, mean={l_mean:.4f}"
+                )
 
             vocab_keys = list(vocabulary.keys())
-            
+
             if method == "single_label":
                 # For categories/composition: Pick the BEST match regardless of absolute score.
                 # Use Softmax.
                 # Scale logits by learned scale (or default ~100) to sharpen distribution
-                scale = np.exp(self.logit_scale) if self.logit_scale is not None else 100.0
+                scale = (
+                    np.exp(self.logit_scale) if self.logit_scale is not None else 100.0
+                )
                 scaled_logits = logits * scale
-                
+
                 # Softmax
-                exp_logits = np.exp(scaled_logits - np.max(scaled_logits)) # Stable softmax
+                exp_logits = np.exp(
+                    scaled_logits - np.max(scaled_logits)
+                )  # Stable softmax
                 probs = exp_logits / np.sum(exp_logits)
-                
+
                 # Sort all
                 results = []
                 for i, prob in enumerate(probs):
                     results.append((vocab_keys[i], float(prob)))
                 results.sort(key=lambda x: x[1], reverse=True)
-                
+
                 # Check confidence of top result against a minimal reasonable threshold?
                 # For softmax, if one is much higher than others, it's confident.
                 return results[:top_k]
-                
+
             else:
                 # For Moods/Styles: Use RELATIVE scoring with specificity penalties
                 # This prevents generic labels from over-matching
-                
+
                 # Start with raw cosine similarities
                 raw_scores = logits.copy()
-                
+
                 # Apply specificity penalties to known over-matching labels
                 adjusted_scores = np.zeros_like(raw_scores)
                 for i, label in enumerate(vocab_keys):
                     penalty = LABEL_SPECIFICITY_PENALTIES.get(label, 1.0)
                     adjusted_scores[i] = raw_scores[i] * penalty
-                
+
                 # Log score statistics for debugging
                 if len(adjusted_scores) > 0:
                     raw_max = float(np.max(raw_scores))
                     adj_max = float(np.max(adjusted_scores))
                     mean_score = float(np.mean(adjusted_scores))
                     std_score = float(np.std(adjusted_scores))
-                    logger.info(f"Scores: raw_max={raw_max:.4f}, adj_max={adj_max:.4f}, "
-                               f"mean={mean_score:.4f}, std={std_score:.4f}")
-                
+                    logger.info(
+                        f"Scores: raw_max={raw_max:.4f}, adj_max={adj_max:.4f}, "
+                        f"mean={mean_score:.4f}, std={std_score:.4f}"
+                    )
+
                 # RELATIVE SCORING: Use z-score based threshold
                 # Only accept labels that are significantly above average
                 mean_score = np.mean(adjusted_scores)
                 std_score = np.std(adjusted_scores)
-                
+
                 # Dynamic threshold: mean + 0.5*std (z-score of 0.5)
                 # This ensures only relatively distinctive matches are selected
                 z_threshold = mean_score + 0.5 * std_score
-                
+
                 # Build candidate list
                 candidates = []
                 for i, score in enumerate(adjusted_scores):
                     if score >= z_threshold:
-                        candidates.append((vocab_keys[i], float(score), float(raw_scores[i])))
-                
+                        candidates.append(
+                            (vocab_keys[i], float(score), float(raw_scores[i]))
+                        )
+
                 candidates.sort(key=lambda x: x[1], reverse=True)
-                
+
                 if candidates:
                     # Additional filter: only keep items within 75% of top score
                     # This prevents weak secondary matches
                     top_score = candidates[0][1]
                     min_acceptable = top_score * 0.75
                     candidates = [c for c in candidates if c[1] >= min_acceptable]
-                    
+
                     # Return label and adjusted score
                     results = [(c[0], c[1]) for c in candidates]
-                    logger.info(f"Selected {len(results)} labels above threshold {z_threshold:.4f}: "
-                               f"{[(r[0], f'{r[1]:.4f}') for r in results[:3]]}")
+                    logger.info(
+                        f"Selected {len(results)} labels above threshold {z_threshold:.4f}: "
+                        f"{[(r[0], f'{r[1]:.4f}') for r in results[:3]]}"
+                    )
                 else:
                     # Fallback: take top-k by adjusted score
                     top_indices = np.argsort(adjusted_scores)[-top_k:][::-1]
-                    results = [(vocab_keys[i], float(adjusted_scores[i])) for i in top_indices]
-                    logger.info(f"No results above z-threshold {z_threshold:.4f}, "
-                               f"returning top {top_k}: {[(r[0], f'{r[1]:.4f}') for r in results]}")
-                
+                    results = [
+                        (vocab_keys[i], float(adjusted_scores[i])) for i in top_indices
+                    ]
+                    logger.info(
+                        f"No results above z-threshold {z_threshold:.4f}, "
+                        f"returning top {top_k}: {[(r[0], f'{r[1]:.4f}') for r in results]}"
+                    )
+
                 return results[:top_k]
-            
+
         except Exception as e:
             logger.warning(
                 f"Classification failed: {e}, "
                 f"embedding shape: {image_embedding.shape}, dtype: {image_embedding.dtype}"
             )
             return []
-    
+
     def classify_category(
-        self,
-        image_embedding: np.ndarray,
-        top_k: int = 2
+        self, image_embedding: np.ndarray, top_k: int = 2
     ) -> Tuple[str, List[str], float]:
         """
         Classify image into categories using zero-shot classification.
-        
+
         Returns:
             Tuple of (primary_category, subcategories, confidence)
         """
         if self._category_embeddings is None:
-            self._category_embeddings = self._precompute_text_embeddings(CATEGORY_VOCABULARY)
-        
+            self._category_embeddings = self._precompute_text_embeddings(
+                CATEGORY_VOCABULARY
+            )
+
         # Use single_label logic (Softmax) to ensure we always get a category
         results = self._classify_against_vocabulary(
             image_embedding,
             CATEGORY_VOCABULARY,
             self._category_embeddings,
             top_k=top_k,
-            threshold=0.0, # Ignored for single_label
-            method="single_label"
+            threshold=0.0,  # Ignored for single_label
+            method="single_label",
         )
-        
+
         if not results:
             return "general", [], 0.0
-        
+
         primary = results[0][0]
         confidence = results[0][1]
-        
+
         # Subcategories are just the next best ones, if valid confidence
         subcats = [r[0] for r in results[1:] if r[1] > 0.1]
-        
+
         return primary, subcats, confidence
-    
+
     def classify_mood(self, image_embedding: np.ndarray, top_k: int = 3) -> List[str]:
         """Classify image mood using zero-shot classification."""
         if self._mood_embeddings is None:
             self._mood_embeddings = self._precompute_text_embeddings(MOOD_VOCABULARY)
-        
+
         results = self._classify_against_vocabulary(
             image_embedding,
             MOOD_VOCABULARY,
             self._mood_embeddings,
             top_k=top_k,
             threshold=0.05,  # Lowered for subjective wallpaper aesthetics
-            method="multi_label"
+            method="multi_label",
         )
-        
+
         return [r[0] for r in results]
-    
+
     def classify_style(self, image_embedding: np.ndarray, top_k: int = 3) -> List[str]:
         """Classify image style using zero-shot classification."""
         if self._style_embeddings is None:
             self._style_embeddings = self._precompute_text_embeddings(STYLE_VOCABULARY)
-        
+
         results = self._classify_against_vocabulary(
             image_embedding,
             STYLE_VOCABULARY,
             self._style_embeddings,
             top_k=top_k,
             threshold=0.05,  # Lowered for subjective wallpaper aesthetics
-            method="multi_label"
+            method="multi_label",
         )
-        
+
         return [r[0] for r in results]
-    
+
     def classify_composition(self, image_embedding: np.ndarray) -> str:
         """Classify composition type using zero-shot classification."""
         if self._composition_embeddings is None:
-            self._composition_embeddings = self._precompute_text_embeddings(COMPOSITION_VOCABULARY)
-        
+            self._composition_embeddings = self._precompute_text_embeddings(
+                COMPOSITION_VOCABULARY
+            )
+
         # Use single_label (Softmax)
         results = self._classify_against_vocabulary(
             image_embedding,
@@ -626,43 +648,41 @@ class MetadataExtractor:
             self._composition_embeddings,
             top_k=1,
             threshold=0.0,
-            method="single_label"
+            method="single_label",
         )
-        
+
         return results[0][0] if results else "balanced"
-    
+
     # =========================================================================
     # PIXEL-BASED ANALYSIS
     # =========================================================================
-    
+
     def extract_colors(
-        self,
-        image: Image.Image,
-        n_colors: int = 5
+        self, image: Image.Image, n_colors: int = 5
     ) -> Tuple[List[str], int, float]:
         """
         Extract dominant colors using K-means in LAB space.
-        
+
         Returns:
             Tuple of (hex_colors, dominant_hue, color_diversity)
         """
         # Convert to numpy and resize for efficiency
         img_small = image.resize((100, 100), Image.Resampling.LANCZOS)
         rgb = np.array(img_small)
-        
+
         # Convert to LAB for perceptually uniform clustering
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
         lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
-        
+
         # Reshape and cluster
         pixels = lab.reshape(-1, 3).astype(np.float32)
-        
+
         try:
             kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init=10)
             kmeans.fit(pixels)
         except Exception:
             return ["#808080"], 0, 0.0
-        
+
         # Convert cluster centers to hex
         hex_colors = []
         for center in kmeans.cluster_centers_:
@@ -670,225 +690,240 @@ class MetadataExtractor:
             bgr_pixel = cv2.cvtColor(lab_pixel, cv2.COLOR_LAB2BGR)
             b, g, r = bgr_pixel[0][0]
             hex_colors.append(f"#{r:02x}{g:02x}{b:02x}")
-        
+
         # Get dominant hue from largest cluster
         labels, counts = np.unique(kmeans.labels_, return_counts=True)
         dominant_idx = labels[np.argmax(counts)]
         dominant_lab = kmeans.cluster_centers_[dominant_idx]
-        
+
         a, b = dominant_lab[1] - 128, dominant_lab[2] - 128
         hue = int(np.arctan2(b, a) * 180 / np.pi) % 360
-        
+
         # Color diversity: average distance between cluster centers
         center_distances = []
         for i, c1 in enumerate(kmeans.cluster_centers_):
-            for c2 in kmeans.cluster_centers_[i+1:]:
+            for c2 in kmeans.cluster_centers_[i + 1 :]:
                 center_distances.append(np.linalg.norm(c1 - c2))
         diversity = np.mean(center_distances) / 100 if center_distances else 0
-        
+
         return hex_colors, hue, min(diversity, 1.0)
-    
+
     def compute_brightness_contrast(
-        self,
-        image: Image.Image
+        self, image: Image.Image
     ) -> Tuple[int, float, bool]:
         """
         Compute brightness and contrast from grayscale image.
-        
+
         Returns:
             Tuple of (brightness 0-255, contrast, is_dark_mode_friendly)
         """
         # Convert to grayscale
         gray = np.array(image.convert("L"))
-        
+
         brightness = int(gray.mean())
         contrast = float(gray.std())
-        
+
         # Dark mode friendly: low brightness, decent contrast
         is_dark_friendly = brightness < 60 and contrast > 20
-        
+
         return brightness, contrast, is_dark_friendly
-    
+
     def compute_symmetry(self, image: Image.Image) -> float:
         """
         Compute symmetry score (0-1).
-        
-        Uses pixel-wise MSE on the flipped image, but with Gaussian Blur 
+
+        Uses pixel-wise MSE on the flipped image, but with Gaussian Blur
         to be robust to high-frequency noise and textures.
         """
         # Resize to small square to focus on macro symmetry and ignore details
         # 64x64 is small enough to ignore minor textures but keep shapes
         img_small = image.resize((64, 64), Image.Resampling.LANCZOS)
         gray = np.array(img_small.convert("L"))
-        
+
         # Apply Gaussian Blur to remove high-frequency noise
         # This makes the conceptual symmetry check much more robust
         blurred = cv2.GaussianBlur(gray, (5, 5), 2.0)
-        
+
         # Calculate MSE between image and its horizontal flip
         flipped = np.fliplr(blurred)
         mse = np.mean((blurred - flipped) ** 2)
-        
+
         # Normalize to 0-1 score (inverted MSE)
-        # Using a sensitivity factor. 
+        # Using a sensitivity factor.
         # MSE of ~500 (pixel diff ~22) should give score ~0.5
-        sensitivity = 1000.0 
+        sensitivity = 1000.0
         score = np.exp(-mse / sensitivity)
-        
+
         return float(max(0.0, min(1.0, score)))
-    
+
     # =========================================================================
     # DINOV3 FOCAL POINT
     # =========================================================================
-    
+
     def find_focal_point_dino(self, image: Image.Image) -> Tuple[float, float]:
         """
         Find focal point using DINOv3 attention maps.
-        
+
         Returns:
             Tuple of (x, y) normalized coordinates (0-1)
         """
         if self.dinov3_model is None or self.dinov3_processor is None:
             return self._find_focal_point_gradient(image)
-        
+
         try:
             import torch
-            
+
             # Process image
             inputs = self.dinov3_processor(images=image, return_tensors="pt")
-            
+
             if self.device == "cuda":
                 inputs = {k: v.cuda() for k, v in inputs.items()}
             elif self.device == "mps":
                 inputs = {k: v.to("mps") for k, v in inputs.items()}
-            
+
             with torch.no_grad():
                 outputs = self.dinov3_model(**inputs, output_attentions=True)
-                
+
                 if outputs.attentions is not None and len(outputs.attentions) > 0:
                     # Get attention from last layer
                     last_attn = outputs.attentions[-1]  # [batch, heads, seq, seq]
-                    
+
                     # Average across heads, get CLS attention to patches
-                    cls_attn = last_attn[:, :, 0, 1:].mean(dim=1)  # [batch, num_patches]
-                    
+                    cls_attn = last_attn[:, :, 0, 1:].mean(
+                        dim=1
+                    )  # [batch, num_patches]
+
                     # Reshape to spatial grid
                     num_patches = cls_attn.shape[1]
-                    h = w = int(num_patches ** 0.5)
-                    
+                    h = w = int(num_patches**0.5)
+
                     if h * w == num_patches:
                         attn_map = cls_attn.view(1, h, w).cpu().numpy()[0]
-                        
+
                         # Find centroid of high-attention region
-                        y_coords, x_coords = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+                        y_coords, x_coords = np.meshgrid(
+                            np.arange(h), np.arange(w), indexing="ij"
+                        )
                         total = attn_map.sum() + 1e-6
-                        
+
                         cx = (x_coords * attn_map).sum() / total / w
                         cy = (y_coords * attn_map).sum() / total / h
-                        
+
                         return (float(cx), float(cy))
-            
+
             # Fallback to gradient method
             return self._find_focal_point_gradient(image)
-            
+
         except Exception as e:
             logger.warning(f"DINOv3 focal point failed: {e}")
             return self._find_focal_point_gradient(image)
-    
+
     def _find_focal_point_gradient(self, image: Image.Image) -> Tuple[float, float]:
         """Fallback focal point detection using gradient magnitude."""
         gray = np.array(image.resize((200, 200), Image.Resampling.LANCZOS).convert("L"))
-        
+
         grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
         grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
         magnitude = np.sqrt(grad_x**2 + grad_y**2)
-        
+
         h, w = gray.shape
-        y_coords, x_coords = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
-        
+        y_coords, x_coords = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
+
         total = magnitude.sum() + 1e-6
         cx = (x_coords * magnitude).sum() / total / w
         cy = (y_coords * magnitude).sum() / total / h
-        
+
         return (float(cx), float(cy))
-    
+
     # =========================================================================
     # MAIN EXTRACTION
     # =========================================================================
-    
+
     def extract_all(
         self,
         image: Image.Image,
         siglip_embedding: Optional[np.ndarray] = None,
-        quality_score: float = 0.0
+        quality_score: float = 0.0,
     ) -> ExtractedMetadata:
         """
         Extract all metadata from an image.
-        
+
         Args:
             image: PIL Image to process
             siglip_embedding: Optional pre-computed SigLIP embedding
             quality_score: Quality score (1-10 scale) for optimization decisions
-            
+
         Returns:
             ExtractedMetadata with all fields populated
         """
         metadata = ExtractedMetadata()
-        
+
         # Pixel-based analysis (no ML)
         try:
-            metadata.color_palette, metadata.dominant_hue, metadata.color_diversity = \
+            metadata.color_palette, metadata.dominant_hue, metadata.color_diversity = (
                 self.extract_colors(image)
+            )
         except Exception as e:
             logger.warning(f"Color extraction failed: {e}")
-        
+
         try:
-            metadata.brightness, metadata.contrast, metadata.is_dark_mode_friendly = \
+            metadata.brightness, metadata.contrast, metadata.is_dark_mode_friendly = (
                 self.compute_brightness_contrast(image)
+            )
         except Exception as e:
             logger.warning(f"Brightness/contrast failed: {e}")
-        
+
         try:
             metadata.symmetry_score = self.compute_symmetry(image)
         except Exception as e:
             logger.warning(f"Symmetry computation failed: {e}")
-        
+
         # SigLIP-based classification (if embedding available)
         if siglip_embedding is not None:
-            logger.info(f"SigLIP embedding available: shape={siglip_embedding.shape}, "
-                       f"dtype={siglip_embedding.dtype}, norm={np.linalg.norm(siglip_embedding):.4f}")
+            logger.info(
+                f"SigLIP embedding available: shape={siglip_embedding.shape}, "
+                f"dtype={siglip_embedding.dtype}, norm={np.linalg.norm(siglip_embedding):.4f}"
+            )
             try:
-                metadata.primary_category, metadata.subcategories, metadata.category_confidence = \
-                    self.classify_category(siglip_embedding)
-                logger.info(f"Category result: {metadata.primary_category} (conf={metadata.category_confidence:.3f})")
+                (
+                    metadata.primary_category,
+                    metadata.subcategories,
+                    metadata.category_confidence,
+                ) = self.classify_category(siglip_embedding)
+                logger.info(
+                    f"Category result: {metadata.primary_category} (conf={metadata.category_confidence:.3f})"
+                )
             except Exception as e:
                 logger.warning(f"Category classification failed: {e}")
                 import traceback
+
                 logger.debug(traceback.format_exc())
-            
+
             try:
                 metadata.mood_tags = self.classify_mood(siglip_embedding)
                 logger.info(f"Mood result: {metadata.mood_tags}")
             except Exception as e:
                 logger.warning(f"Mood classification failed: {e}")
                 import traceback
+
                 logger.debug(traceback.format_exc())
-            
+
             try:
                 metadata.style_tags = self.classify_style(siglip_embedding)
                 logger.info(f"Style result: {metadata.style_tags}")
             except Exception as e:
                 logger.warning(f"Style classification failed: {e}")
                 import traceback
+
                 logger.debug(traceback.format_exc())
-            
+
             try:
                 metadata.composition_type = self.classify_composition(siglip_embedding)
             except Exception as e:
                 logger.warning(f"Composition classification failed: {e}")
         else:
             logger.warning("SigLIP embedding is None - skipping ML classification")
-        
+
         # DINOv3 focal point (quality-based optimization)
         # Premium tier (6.5+): Use DINOv3 for best accuracy
         # Standard tier (<6.5): Use gradient fallback for speed
@@ -902,5 +937,5 @@ class MetadataExtractor:
                 metadata.focal_point_method = "gradient"
         except Exception as e:
             logger.warning(f"Focal point detection failed: {e}")
-        
+
         return metadata
